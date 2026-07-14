@@ -1,11 +1,9 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getDatabase } from "firebase/database"; // Added for your Realtime Database
+import { getAuth } from "firebase/auth";         // Added for User Authentication
 
 // Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCCLhIE25nqpGZpi6SCgBaCcT_Xq4cAJ-s",
   authDomain: "alumniconnect-ea01c.firebaseapp.com",
@@ -19,4 +17,8 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// Export the database and auth tools so your AI agent can use them across the site
+export const db = getDatabase(app);
+export const auth = getAuth(app);
+export default app;
