@@ -1,0 +1,178 @@
+{
+  "entities": {
+    "NetworkSettings": {
+      "title": "Network Settings",
+      "description": "Information about the alumni network",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdBy", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Base user details and role",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["admin", "alumnus", "student"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "photoURL", "role", "createdAt"]
+    },
+    "AlumniProfile": {
+      "title": "Alumni Profile",
+      "description": "Detailed profile and journey of an alumnus",
+      "type": "object",
+      "properties": {
+        "graduationYear": { "type": "integer" },
+        "university": { "type": "string", "maxLength": 150 },
+        "degree": { "type": "string", "maxLength": 150 },
+        "currentJobTitle": { "type": "string", "maxLength": 150 },
+        "currentCompany": { "type": "string", "maxLength": 150 },
+        "country": { "type": "string", "maxLength": 100 },
+        "availableToMentor": { "type": "boolean" },
+        "approvalStatus": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "journey": {
+          "type": "object",
+          "properties": {
+            "whatTheyStudied": { "type": "string", "maxLength": 1000 },
+            "howTheyGotThere": { "type": "string", "maxLength": 1000 },
+            "whatHelpedMost": { "type": "string", "maxLength": 1000 },
+            "whatTheyWouldDoDifferently": { "type": "string", "maxLength": 1000 },
+            "adviceForStudents": { "type": "string", "maxLength": 1000 }
+          },
+          "required": ["whatTheyStudied", "howTheyGotThere", "whatHelpedMost", "whatTheyWouldDoDifferently", "adviceForStudents"]
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "graduationYear",
+        "university",
+        "degree",
+        "currentJobTitle",
+        "currentCompany",
+        "country",
+        "availableToMentor",
+        "approvalStatus",
+        "journey",
+        "updatedAt"
+      ]
+    },
+    "StudentProfile": {
+      "title": "Student Profile",
+      "description": "Student academic interests and progress info",
+      "type": "object",
+      "properties": {
+        "interestArea": { "type": "string", "maxLength": 150 },
+        "currentStage": { "type": "string", "maxLength": 100 }
+      }
+    },
+    "MentorshipRequest": {
+      "title": "Mentorship Request",
+      "description": "A student's request for mentorship from an alumnus",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "alumnusId": { "type": "string" },
+        "message": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "respondedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "alumnusId", "message", "status", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Active chat conversation mapping between student and alumnus",
+      "type": "object",
+      "properties": {
+        "participantIds": { "type": "array" },
+        "lastMessageAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participantIds", "lastMessageAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single text message inside a conversation",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "sentAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "text", "sentAt"]
+    },
+    "Opportunity": {
+      "title": "Opportunity",
+      "description": "Shared internships, scholarships, competitions, workshops, and job openings",
+      "type": "object",
+      "properties": {
+        "postedBy": { "type": "string" },
+        "type": { "type": "string", "enum": ["internship", "scholarship", "competition", "workshop", "job"] },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "externalLink": { "type": "string", "maxLength": 500 },
+        "deadline": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postedBy", "type", "title", "description", "externalLink", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "School announcement created by an admin",
+      "type": "object",
+      "properties": {
+        "postedBy": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "eventDate": { "type": "string", "format": "date-time" },
+        "location": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postedBy", "title", "description", "createdAt"]
+    }
+  },
+  "firestore": {
+    "settings/network": {
+      "schema": "NetworkSettings",
+      "description": "Single document for the global network configuration"
+    },
+    "users/{uid}": {
+      "schema": "User",
+      "description": "Application users indexed by their Auth UID"
+    },
+    "alumniProfiles/{uid}": {
+      "schema": "AlumniProfile",
+      "description": "Alumni directory entries and stories"
+    },
+    "studentProfiles/{uid}": {
+      "schema": "StudentProfile",
+      "description": "Student preferences and educational stages"
+    },
+    "mentorshipRequests/{requestId}": {
+      "schema": "MentorshipRequest",
+      "description": "Requests sent from students to alumni"
+    },
+    "conversations/{requestId}": {
+      "schema": "Conversation",
+      "description": "Chat sessions formed upon accepted mentorship requests"
+    },
+    "conversations/{requestId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual chat messages inside a conversation"
+    },
+    "opportunities/{opportunityId}": {
+      "schema": "Opportunity",
+      "description": "Career and academic opportunities listed by alumni"
+    },
+    "announcements/{announcementId}": {
+      "schema": "Announcement",
+      "description": "Official admin announcements and upcoming event schedules"
+    }
+  }
+}

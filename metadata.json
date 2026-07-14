@@ -1,0 +1,6 @@
+{
+  "name": "AlumniConnect",
+  "description": "A structured, searchable knowledge and mentorship network for students and alumni.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
