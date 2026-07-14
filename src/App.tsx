@@ -97,8 +97,24 @@ export default function App() {
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
   // Navigation
-  const [currentTab, setCurrentTab] = useState<string>("dashboard");
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    const path = window.location.pathname;
+    if (path === "/profile") return "profile";
+    if (path === "/messages") return "messages";
+    if (path === "/opportunities") return "opportunities";
+    if (path === "/announcements") return "announcements";
+    if (path === "/directory") return "directory";
+    if (path === "/requests") return "requests";
+    return "dashboard";
+  });
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [initialRedirectPath, setInitialRedirectPath] = useState<string | null>(() => {
+    const path = window.location.pathname;
+    if (path !== "/" && path !== "/login" && !path.startsWith("/join/")) {
+      return path;
+    }
+    return null;
+  });
 
   // Sign In inputs
   const [emailInput, setEmailInput] = useState("");
@@ -420,6 +436,109 @@ export default function App() {
 
     return () => unsub();
   }, [currentUser, currentSchoolId, userRole, alumniStatus]);
+
+  // 7. Route & URL History Synchronization
+  useEffect(() => {
+    const handleUrlSync = () => {
+      const path = window.location.pathname;
+      let targetPath = "/";
+
+      if (!currentUser) {
+        if (joiningSchoolId) {
+          targetPath = `/join/${joiningSchoolId}`;
+        } else {
+          targetPath = "/login";
+        }
+      } else {
+        if (joiningSchoolId) {
+          targetPath = `/join/${joiningSchoolId}`;
+        } else if (currentSchoolId) {
+          if (currentTab === "profile") {
+            targetPath = "/profile";
+          } else if (currentTab === "messages") {
+            targetPath = "/messages";
+          } else if (currentTab === "opportunities") {
+            targetPath = "/opportunities";
+          } else if (currentTab === "announcements") {
+            targetPath = "/announcements";
+          } else if (currentTab === "directory") {
+            targetPath = "/directory";
+          } else if (currentTab === "requests") {
+            targetPath = "/requests";
+          } else {
+            targetPath = "/dashboard";
+          }
+        } else {
+          targetPath = "/";
+        }
+      }
+
+      if (path !== targetPath) {
+        window.history.pushState(null, "", targetPath);
+      }
+    };
+
+    handleUrlSync();
+  }, [currentUser, currentTab, joiningSchoolId, currentSchoolId]);
+
+  // 8. Listen to browser Back/Forward (popstate) navigation events
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      
+      // Parse joiningSchoolId from URL
+      if (path.startsWith("/join/")) {
+        const id = path.split("/join/")[1] || null;
+        if (id) {
+          setJoiningSchoolId(id);
+          localStorage.setItem("alumniconnect_pending_join", id);
+        }
+      } else {
+        setJoiningSchoolId(null);
+        localStorage.removeItem("alumniconnect_pending_join");
+      }
+
+      // Parse tabs
+      if (path === "/profile") {
+        setCurrentTab("profile");
+      } else if (path === "/messages") {
+        setCurrentTab("messages");
+      } else if (path === "/opportunities") {
+        setCurrentTab("opportunities");
+      } else if (path === "/announcements") {
+        setCurrentTab("announcements");
+      } else if (path === "/directory") {
+        setCurrentTab("directory");
+      } else if (path === "/requests") {
+        setCurrentTab("requests");
+      } else if (path === "/dashboard" || path === "/") {
+        setCurrentTab("dashboard");
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // 9. Redirect to the initial deep-linked tab after successful auth
+  useEffect(() => {
+    if (currentUser && initialRedirectPath) {
+      if (initialRedirectPath === "/profile") {
+        setCurrentTab("profile");
+      } else if (initialRedirectPath === "/messages") {
+        setCurrentTab("messages");
+      } else if (initialRedirectPath === "/opportunities") {
+        setCurrentTab("opportunities");
+      } else if (initialRedirectPath === "/announcements") {
+        setCurrentTab("announcements");
+      } else if (initialRedirectPath === "/directory") {
+        setCurrentTab("directory");
+      } else if (initialRedirectPath === "/requests") {
+        setCurrentTab("requests");
+      }
+      setInitialRedirectPath(null);
+    }
+  }, [currentUser, initialRedirectPath]);
 
   // Authenticator Functions
   const validateEmail = (val: string) => {
@@ -772,21 +891,24 @@ export default function App() {
   if (joiningSchoolId && !joiningSchoolDoc) {
     return (
       <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
-        <div className="bg-white border border-stone-200 p-8 max-w-sm w-full text-center space-y-4 shadow-sm">
-          <Building2 className="w-12 h-12 text-stone-300 mx-auto" />
-          <h2 className="text-xl font-serif font-bold text-stone-900">Invalid Invite Link</h2>
+        <div className="bg-white border border-stone-200 p-8 max-w-md w-full text-center space-y-4 shadow-md">
+          <Building2 className="w-12 h-12 text-red-400 mx-auto" />
+          <h2 className="text-xl font-serif font-bold text-stone-900">This invitation is no longer valid.</h2>
           <p className="text-xs text-stone-500 leading-relaxed">
-            This school network could not be found or the link has expired. Please check with your administrator.
+            The school portal you are trying to join could not be found, has been removed, or the link has expired. Please verify with your school administrator or ensure the URL was copied correctly.
           </p>
-          <button
-            onClick={() => {
-              setJoiningSchoolId(null);
-              localStorage.removeItem("alumniconnect_pending_join");
-            }}
-            className="px-4 py-2 bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-[10px] font-bold uppercase tracking-wider rounded-none cursor-pointer"
-          >
-            Go to Home
-          </button>
+          <div className="pt-2">
+            <button
+              onClick={() => {
+                setJoiningSchoolId(null);
+                localStorage.removeItem("alumniconnect_pending_join");
+                window.history.pushState(null, "", "/login");
+              }}
+              className="px-5 py-2.5 bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-[10px] font-bold uppercase tracking-wider rounded-none transition-colors cursor-pointer"
+            >
+              Go to Home Page
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -865,31 +987,47 @@ export default function App() {
         <div className="col-span-1 md:col-span-7 flex flex-col justify-center items-center p-6 sm:p-12 md:p-16 lg:p-24 w-full">
           <div className="max-w-md w-full space-y-8 bg-white border border-stone-200/80 p-8 shadow-md">
             
-            {/* Header: Network Logo / Title for mobile only & Headline */}
-            <div className="text-center md:text-left space-y-2">
-              <div className="md:hidden w-10 h-10 rounded-none border border-slate-700 bg-[#1E293B] text-white font-serif italic text-lg font-bold flex items-center justify-center shadow-md mx-auto mb-4">
-                {joiningSchoolDoc ? joiningSchoolDoc.name.substring(0, 2).toUpperCase() : "AC"}
-              </div>
-
-              {joiningSchoolDoc && (
-                <div className="md:hidden block text-center pb-2">
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-800 bg-amber-50 px-2.5 py-0.5 border border-amber-100/40">
+            {/* Header: Network Logo / Title & Headline */}
+            {joiningSchoolDoc ? (
+              <div className="text-center space-y-4 pb-4 border-b border-stone-100">
+                {/* School Logo / Monogram */}
+                <div className="w-16 h-16 rounded-full bg-[#1E293B] text-amber-400 font-serif italic text-2xl font-bold flex items-center justify-center shadow-md mx-auto border-2 border-stone-100 animate-fade-in">
+                  {joiningSchoolDoc.name.substring(0, 2).toUpperCase()}
+                </div>
+                
+                <div className="space-y-1">
+                  <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-amber-800 bg-amber-50 px-2.5 py-0.5 border border-amber-200/50">
                     Community Invitation
                   </span>
-                  <p className="text-xs font-semibold text-stone-700 mt-2">{joiningSchoolDoc.name}</p>
+                  <h2 className="text-2xl font-serif font-bold text-stone-900 tracking-tight leading-tight">
+                    Join {joiningSchoolDoc.name}
+                  </h2>
+                  <p className="text-xs text-stone-500 leading-relaxed max-w-sm mx-auto">
+                    {joiningSchoolDoc.description || "You have been invited to register and join your school's private professional directory and mentor hub."}
+                  </p>
                 </div>
-              )}
 
-              <h2 className="text-2xl font-serif font-bold text-stone-950 tracking-tight">
-                {isSignUp ? "Create your account" : "Welcome back"}
-              </h2>
-              <p className="text-xs text-stone-500">
-                {isSignUp 
-                  ? "Enter your credentials to get started with the network" 
-                  : "Sign in to access your secure community dashboard"
-                }
-              </p>
-            </div>
+                <div className="p-3 bg-stone-50 border border-stone-100/80 text-[11px] text-stone-600 leading-normal text-left">
+                  🌟 <strong>Welcome Message:</strong> This is a secure portal for students and alumni. Connect with mentors, browse career paths, and message verified members. Sign in below to accept this invitation.
+                </div>
+              </div>
+            ) : (
+              <div className="text-center md:text-left space-y-2">
+                <div className="md:hidden w-10 h-10 rounded-none border border-slate-700 bg-[#1E293B] text-white font-serif italic text-lg font-bold flex items-center justify-center shadow-md mx-auto mb-4">
+                  AC
+                </div>
+
+                <h2 className="text-2xl font-serif font-bold text-stone-950 tracking-tight">
+                  {isSignUp ? "Create your account" : "Welcome back"}
+                </h2>
+                <p className="text-xs text-stone-500">
+                  {isSignUp 
+                    ? "Enter your credentials to get started with the network" 
+                    : "Sign in to access your secure community dashboard"
+                  }
+                </p>
+              </div>
+            )}
 
             {/* Top-level Banner for Account Errors */}
             {authError && (
