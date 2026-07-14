@@ -649,9 +649,13 @@ export default function App() {
         createdAt: Timestamp.now()
       });
 
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      await setDoc(doc(db, "users", currentUser.uid), {
+        email: currentUser.email || "",
+        displayName: currentUser.displayName || "Member",
+        photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(currentUser.displayName || "Member")}`,
+        createdAt: Timestamp.now(),
         role: "admin"
-      });
+      }, { merge: true });
 
       setLandingChoice(null);
       setCurrentSchoolId(schoolId);
@@ -674,9 +678,13 @@ export default function App() {
         createdAt: Timestamp.now()
       });
 
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      await setDoc(doc(db, "users", currentUser.uid), {
+        email: currentUser.email || "",
+        displayName: currentUser.displayName || "Member",
+        photoURL: currentUser.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(currentUser.displayName || "Member")}`,
+        createdAt: Timestamp.now(),
         role: selectedRole
-      });
+      }, { merge: true });
 
       localStorage.removeItem("alumniconnect_pending_join");
       setCurrentSchoolId(joiningSchoolId);
