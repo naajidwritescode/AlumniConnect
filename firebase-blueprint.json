@@ -40,13 +40,23 @@
         "journey": {
           "type": "object",
           "properties": {
-            "whatTheyStudied": { "type": "string", "maxLength": 1000 },
-            "howTheyGotThere": { "type": "string", "maxLength": 1000 },
-            "whatHelpedMost": { "type": "string", "maxLength": 1000 },
-            "whatTheyWouldDoDifferently": { "type": "string", "maxLength": 1000 },
-            "adviceForStudents": { "type": "string", "maxLength": 1000 }
+            "story": { "type": "string", "maxLength": 3000 },
+            "whatHelpedSucceed": { "type": "string", "maxLength": 3000 },
+            "biggestChallenge": { "type": "string", "maxLength": 3000 },
+            "startAgain": { "type": "string", "maxLength": 3000 },
+            "adviceForStudents": { "type": "string", "maxLength": 3000 },
+            "recommendedResources": { "type": "string", "maxLength": 3000 },
+            "funFact": { "type": "string", "maxLength": 3000 }
           },
-          "required": ["whatTheyStudied", "howTheyGotThere", "whatHelpedMost", "whatTheyWouldDoDifferently", "adviceForStudents"]
+          "required": [
+            "story",
+            "whatHelpedSucceed",
+            "biggestChallenge",
+            "startAgain",
+            "adviceForStudents",
+            "recommendedResources",
+            "funFact"
+          ]
         },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -68,9 +78,11 @@
       "description": "Student academic interests and progress info",
       "type": "object",
       "properties": {
-        "interestArea": { "type": "string", "maxLength": 150 },
-        "currentStage": { "type": "string", "maxLength": 100 }
-      }
+        "currentClass": { "type": "string", "maxLength": 50 },
+        "intendedFieldOfStudy": { "type": "string", "maxLength": 150 },
+        "shortIntroduction": { "type": "string", "maxLength": 300 }
+      },
+      "required": ["currentClass"]
     },
     "MentorshipRequest": {
       "title": "Mentorship Request",

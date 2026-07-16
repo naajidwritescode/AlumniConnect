@@ -286,14 +286,14 @@ export default function RequestsView({
                           {stuUser?.displayName}
                         </h4>
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono text-stone-500 uppercase tracking-wider">
-                          {stuProfile?.interestArea && (
+                          {(stuProfile?.currentClass || (stuProfile as any)?.currentStage) && (
                             <span className="flex items-center space-x-1">
                               <GraduationCap className="w-3.5 h-3.5" />
-                              <span>Interest: {stuProfile.interestArea}</span>
+                              <span>Class: {stuProfile?.currentClass || (stuProfile as any)?.currentStage}</span>
                             </span>
                           )}
-                          {stuProfile?.currentStage && (
-                            <span>&bull; Stage: {stuProfile.currentStage}</span>
+                          {(stuProfile?.intendedFieldOfStudy || (stuProfile as any)?.interestArea) && (
+                            <span>&bull; Field: {stuProfile?.intendedFieldOfStudy || (stuProfile as any)?.interestArea}</span>
                           )}
                         </div>
                       </div>

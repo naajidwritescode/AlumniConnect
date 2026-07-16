@@ -96,10 +96,24 @@ export default function DirectoryView({ currentUserId, currentUserRole, schoolId
           const userPromises = profilesList.map(async (profile) => {
             const userDocSnap = await getDoc(doc(db, "users", profile.userId));
             if (userDocSnap.exists()) {
+              const rawProfile = profile as any;
+              const journey = {
+                story: rawProfile.journey?.story || rawProfile.journey?.whatTheyStudied || "",
+                whatHelpedSucceed: rawProfile.journey?.whatHelpedSucceed || rawProfile.journey?.whatHelpedMost || "",
+                biggestChallenge: rawProfile.journey?.biggestChallenge || rawProfile.journey?.howTheyGotThere || "",
+                startAgain: rawProfile.journey?.startAgain || rawProfile.journey?.whatTheyWouldDoDifferently || "",
+                adviceForStudents: rawProfile.journey?.adviceForStudents || "",
+                recommendedResources: rawProfile.journey?.recommendedResources || "",
+                funFact: rawProfile.journey?.funFact || ""
+              };
+              const mappedProfile: AlumniProfileDoc = {
+                ...rawProfile,
+                journey
+              };
               return {
                 uid: profile.userId,
                 user: userDocSnap.data() as UserDoc,
-                profile: profile
+                profile: mappedProfile
               };
             }
             return null;
@@ -356,43 +370,87 @@ export default function DirectoryView({ currentUserId, currentUserRole, schoolId
         </div>
 
         {/* Journey Sections */}
-        <div className="space-y-4 pt-2">
-          <h3 className="text-lg font-serif font-bold text-stone-900 border-b border-stone-200 pb-2">The Alumni Journey</h3>
+        <div className="space-y-6 pt-2">
+          <div className="border-b border-stone-200 pb-2">
+            <h3 className="text-xl font-serif font-bold text-stone-900">Curated Interview Profile</h3>
+            <p className="text-xs text-stone-500">Read about their school memories, professional milestones, and reflective advice.</p>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-6">
+            {/* Question 1 */}
             <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
-              <h4 className="text-[10px] font-mono font-bold tracking-wider uppercase text-stone-400 leading-normal">
-                What did you study, and how did you get to where you are now?
-              </h4>
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">1</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">Tell us your story</h4>
+              </div>
               <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                {p.journey.whatTheyStudied}
+                {p.journey.story}
               </p>
             </div>
 
+            {/* Question 2 */}
             <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
-              <h4 className="text-[10px] font-mono font-bold tracking-wider uppercase text-stone-400 leading-normal">
-                What helped you most along the way?
-              </h4>
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">2</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">What helped you succeed?</h4>
+              </div>
               <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                {p.journey.whatHelpedMost}
+                {p.journey.whatHelpedSucceed}
               </p>
             </div>
 
+            {/* Question 3 */}
             <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
-              <h4 className="text-[10px] font-mono font-bold tracking-wider uppercase text-stone-400 leading-normal">
-                What would you do differently?
-              </h4>
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">3</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">Biggest challenge</h4>
+              </div>
               <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                {p.journey.whatTheyWouldDoDifferently}
+                {p.journey.biggestChallenge}
               </p>
             </div>
 
-            <div className="bg-stone-50 border border-stone-200 p-6 rounded-none space-y-3 border-l-4 border-l-amber-600 shadow-none">
-              <h4 className="text-[10px] font-mono font-bold tracking-wider uppercase text-amber-800 leading-normal">
-                One piece of advice for a student following this path?
-              </h4>
+            {/* Question 4 */}
+            <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">4</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">If you could start again...</h4>
+              </div>
+              <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                {p.journey.startAgain}
+              </p>
+            </div>
+
+            {/* Question 5 */}
+            <div className="bg-stone-50 border border-stone-200 border-l-4 border-l-amber-600 p-6 rounded-none space-y-3 shadow-none">
+              <div className="flex items-center space-x-2.5 text-amber-800 border-b border-amber-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">5</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-amber-800">Advice for current students</h4>
+              </div>
               <p className="text-stone-900 text-sm font-serif italic font-medium leading-relaxed whitespace-pre-wrap">
                 "{p.journey.adviceForStudents}"
+              </p>
+            </div>
+
+            {/* Question 6 */}
+            <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">6</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">Resources you recommend</h4>
+              </div>
+              <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                {p.journey.recommendedResources}
+              </p>
+            </div>
+
+            {/* Question 7 */}
+            <div className="bg-white border border-stone-200 p-6 rounded-none space-y-3 shadow-none">
+              <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                <span className="flex items-center justify-center w-5 h-5 bg-stone-900 text-white font-mono text-[10px] font-bold">7</span>
+                <h4 className="font-serif font-bold text-xs uppercase tracking-wide text-stone-500">Fun fact</h4>
+              </div>
+              <p className="text-stone-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                {p.journey.funFact}
               </p>
             </div>
           </div>

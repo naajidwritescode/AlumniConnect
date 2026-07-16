@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, GraduationCap, Globe, Check, Info, Loader } from "lucide-react";
+import { User, GraduationCap, Globe, Check, Info, Loader, BookOpen, Star, HelpCircle, Heart, Compass, ShieldAlert } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { UserRole, AlumniProfileDoc, StudentProfileDoc, UserDoc } from "../types";
@@ -28,8 +28,9 @@ export default function ProfileForm({
   const [displayName, setDisplayName] = useState(currentUserName);
 
   // Student Profile State
-  const [interestArea, setInterestArea] = useState("");
-  const [currentStage, setCurrentStage] = useState("Undergraduate - 1st Year");
+  const [currentClass, setCurrentClass] = useState("Class 10");
+  const [intendedFieldOfStudy, setIntendedFieldOfStudy] = useState("");
+  const [shortIntroduction, setShortIntroduction] = useState("");
 
   // Alumnus Profile State
   const [graduationYear, setGraduationYear] = useState<number>(2026);
@@ -41,24 +42,29 @@ export default function ProfileForm({
   const [availableToMentor, setAvailableToMentor] = useState(true);
   const [approvalStatus, setApprovalStatus] = useState<"pending" | "approved" | "rejected">("pending");
 
-  // Journey States (Alumni)
-  const [whatTheyStudied, setWhatTheyStudied] = useState("");
-  const [howTheyGotThere, setHowTheyGotThere] = useState("");
-  const [whatHelpedMost, setWhatHelpedMost] = useState("");
-  const [whatTheyWouldDoDifferently, setWhatTheyWouldDoDifferently] = useState("");
+  // Journey States (Alumni 7 Questions)
+  const [story, setStory] = useState("");
+  const [whatHelpedSucceed, setWhatHelpedSucceed] = useState("");
+  const [biggestChallenge, setBiggestChallenge] = useState("");
+  const [startAgain, setStartAgain] = useState("");
   const [adviceForStudents, setAdviceForStudents] = useState("");
+  const [recommendedResources, setRecommendedResources] = useState("");
+  const [funFact, setFunFact] = useState("");
 
-  const countries = ["United States", "Canada", "United Kingdom", "Germany", "France", "Japan", "Australia", "United Arab Emirates", "Ireland"];
-  const stages = [
-    "Grade 11 / Junior High",
-    "Grade 12 / Senior High",
-    "Undergraduate - 1st Year",
-    "Undergraduate - 2nd Year",
-    "Undergraduate - 3rd Year",
-    "Undergraduate - 4th Year",
-    "Graduate Student (Master's / PhD)",
-    "Postgraduate"
+  const countries = ["Bangladesh", "United States", "Canada", "United Kingdom", "Germany", "France", "Japan", "Australia", "United Arab Emirates", "Ireland", "Sweden", "Singapore", "Malaysia", "India"];
+  
+  const classesList = [
+    "Class 7",
+    "Class 8",
+    "Class 9",
+    "Class 10",
+    "Class 11",
+    "Class 12"
   ];
+
+  const getWordCount = (text: string) => {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  };
 
   useEffect(() => {
     async function loadProfile() {
@@ -74,29 +80,32 @@ export default function ProfileForm({
         if (currentUserRole === "student") {
           const pSnap = await getDoc(doc(db, "studentProfiles", `${schoolId}_${currentUserId}`));
           if (pSnap.exists()) {
-            const pData = pSnap.data() as StudentProfileDoc;
-            setInterestArea(pData.interestArea || "");
-            setCurrentStage(pData.currentStage || "Undergraduate - 1st Year");
+            const pData = pSnap.data() as any;
+            setCurrentClass(pData.currentClass || pData.currentStage || "Class 10");
+            setIntendedFieldOfStudy(pData.intendedFieldOfStudy || pData.interestArea || "");
+            setShortIntroduction(pData.shortIntroduction || "");
           }
         } else if (currentUserRole === "alumnus") {
           const pSnap = await getDoc(doc(db, "alumniProfiles", `${schoolId}_${currentUserId}`));
           if (pSnap.exists()) {
-            const pData = pSnap.data() as AlumniProfileDoc;
+            const pData = pSnap.data() as any;
             setGraduationYear(pData.graduationYear || 2026);
-            setUniversity(pData.university || "Boston Institute of Technology");
+            setUniversity(pData.university || "");
             setDegree(pData.degree || "");
             setCurrentJobTitle(pData.currentJobTitle || "");
             setCurrentCompany(pData.currentCompany || "");
-            setCountry(pData.country || "United States");
+            setCountry(pData.country || "Bangladesh");
             setAvailableToMentor(pData.availableToMentor !== false);
             setApprovalStatus(pData.approvalStatus || "pending");
             
             if (pData.journey) {
-              setWhatTheyStudied(pData.journey.whatTheyStudied || "");
-              setHowTheyGotThere(pData.journey.howTheyGotThere || "");
-              setWhatHelpedMost(pData.journey.whatHelpedMost || "");
-              setWhatTheyWouldDoDifferently(pData.journey.whatTheyWouldDoDifferently || "");
+              setStory(pData.journey.story || pData.journey.whatTheyStudied || "");
+              setWhatHelpedSucceed(pData.journey.whatHelpedSucceed || pData.journey.whatHelpedMost || "");
+              setBiggestChallenge(pData.journey.biggestChallenge || pData.journey.howTheyGotThere || "");
+              setStartAgain(pData.journey.startAgain || pData.journey.whatTheyWouldDoDifferently || "");
               setAdviceForStudents(pData.journey.adviceForStudents || "");
+              setRecommendedResources(pData.journey.recommendedResources || "");
+              setFunFact(pData.journey.funFact || "");
             }
           }
         }
@@ -117,7 +126,7 @@ export default function ProfileForm({
     setSaving(true);
 
     try {
-      // 1. Update display name in base user document (keeping role identical to satisfy rules)
+      // 1. Update display name in base user document
       const uRef = doc(db, "users", currentUserId);
       const uSnap = await getDoc(uRef);
       if (uSnap.exists()) {
@@ -128,15 +137,16 @@ export default function ProfileForm({
 
       // 2. Save role-specific profile document
       if (currentUserRole === "student") {
-        const payload: any = {
+        const payload: StudentProfileDoc = {
           schoolId,
           userId: currentUserId,
-          interestArea: interestArea.trim(),
-          currentStage
+          currentClass,
+          intendedFieldOfStudy: intendedFieldOfStudy.trim(),
+          shortIntroduction: shortIntroduction.trim()
         };
         await setDoc(doc(db, "studentProfiles", `${schoolId}_${currentUserId}`), payload);
       } else if (currentUserRole === "alumnus") {
-        const payload: any = {
+        const payload: AlumniProfileDoc = {
           schoolId,
           userId: currentUserId,
           graduationYear: Number(graduationYear),
@@ -148,11 +158,13 @@ export default function ProfileForm({
           availableToMentor,
           approvalStatus, // maintains existing status (either pending or approved)
           journey: {
-            whatTheyStudied: whatTheyStudied.trim(),
-            howTheyGotThere: howTheyGotThere.trim(),
-            whatHelpedMost: whatHelpedMost.trim(),
-            whatTheyWouldDoDifferently: whatTheyWouldDoDifferently.trim(),
-            adviceForStudents: adviceForStudents.trim()
+            story: story.trim(),
+            whatHelpedSucceed: whatHelpedSucceed.trim(),
+            biggestChallenge: biggestChallenge.trim(),
+            startAgain: startAgain.trim(),
+            adviceForStudents: adviceForStudents.trim(),
+            recommendedResources: recommendedResources.trim(),
+            funFact: funFact.trim()
           },
           updatedAt: Timestamp.now()
         };
@@ -185,7 +197,7 @@ export default function ProfileForm({
         <p className="text-sm text-stone-500">
           {isOnboarding 
             ? "Enter your details to register on the network and start connecting." 
-            : "Update your professional details, contact preferences, and journey story."}
+            : "Update your academic details, contact preferences, and journey story."}
         </p>
       </div>
 
@@ -195,84 +207,109 @@ export default function ProfileForm({
           <div className="text-xs space-y-1">
             <p className="font-serif font-bold">Your Profile is Pending Approval</p>
             <p className="leading-relaxed text-stone-700">
-              An administrator is currently reviewing your journey. Approved alumni are visible in the directory and can receive mentorship inquiries. You can continue updating your profile fields.
+              An administrator is currently reviewing your profile. Approved alumni are visible in the directory and can receive mentorship inquiries. You can continue updating your profile fields.
             </p>
           </div>
         </div>
       )}
 
-      <form onSubmit={handleSaveProfile} className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none space-y-6">
-        {/* Core fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
-              Your Full Name
-            </label>
-            <input
-              type="text"
-              required
-              maxLength={100}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400"
-            />
-          </div>
+      <form onSubmit={handleSaveProfile} className="space-y-6">
+        
+        {/* Card 1: Core details */}
+        <div className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none space-y-4">
+          <h3 className="font-serif font-bold text-stone-900 text-sm border-b border-stone-100 pb-2">
+            Basic Information
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                Full Name
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={100}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400"
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
-              Email Address (Google Identity)
-            </label>
-            <input
-              type="email"
-              disabled
-              value={currentUserId ? "Verified Gmail Address" : ""}
-              placeholder="Your email address"
-              className="w-full text-stone-400 bg-stone-100 border border-stone-200 rounded-none px-3 py-2 text-sm cursor-not-allowed font-mono"
-            />
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                Email Address (Google Identity)
+              </label>
+              <input
+                type="email"
+                disabled
+                value={currentUserId ? "Verified Gmail Address" : ""}
+                placeholder="Your email address"
+                className="w-full text-stone-400 bg-stone-100 border border-stone-200 rounded-none px-3 py-2 text-sm cursor-not-allowed font-mono"
+              />
+            </div>
           </div>
         </div>
 
         {currentUserRole === "student" ? (
           /* STUDENT ONLY FIELDS */
-          <div className="space-y-4 pt-4 border-t border-stone-200">
-            <h3 className="font-serif font-bold text-stone-900 text-sm">Academic Details</h3>
+          <div className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none space-y-6">
+            <h3 className="font-serif font-bold text-stone-900 text-sm border-b border-stone-100 pb-2">Academic Profile</h3>
+            
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
-                  Academic Interest Area
+                  Current Class <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
+                <select
                   required
-                  maxLength={150}
-                  placeholder="e.g. Computer Science, Mechanical Engineering, Pre-Med"
-                  value={interestArea}
-                  onChange={(e) => setInterestArea(e.target.value)}
-                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400"
-                />
+                  value={currentClass}
+                  onChange={(e) => setCurrentClass(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                >
+                  {classesList.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-stone-400 italic">Select your current school class progression</p>
               </div>
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
-                  Current Educational Stage
+                  Intended Field of Study <span className="text-stone-400">(Optional)</span>
                 </label>
-                <select
-                  value={currentStage}
-                  onChange={(e) => setCurrentStage(e.target.value)}
-                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-mono"
-                >
-                  {stages.map((st) => (
-                    <option key={st} value={st}>{st}</option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  maxLength={150}
+                  placeholder="e.g. Computer Science, Medicine, Engineering, Business, Law..."
+                  value={intendedFieldOfStudy}
+                  onChange={(e) => setIntendedFieldOfStudy(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                Short Introduction <span className="text-stone-400">(Optional, ~200 characters)</span>
+              </label>
+              <textarea
+                maxLength={200}
+                rows={3}
+                placeholder="I'm interested in studying Computer Science and hope to learn from alumni who have gone through this journey."
+                value={shortIntroduction}
+                onChange={(e) => setShortIntroduction(e.target.value)}
+                className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+              />
+              <div className="flex justify-end text-[10px] font-mono text-stone-400">
+                {shortIntroduction.length}/200 characters
               </div>
             </div>
           </div>
         ) : (
           /* ALUMNUS ONLY FIELDS */
           <>
-            <div className="space-y-4 pt-4 border-t border-stone-200">
-              <h3 className="font-serif font-bold text-stone-900 text-sm">Professional details</h3>
+            <div className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none space-y-6">
+              <h3 className="font-serif font-bold text-stone-900 text-sm border-b border-stone-100 pb-2">Professional details</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
@@ -298,7 +335,7 @@ export default function ProfileForm({
                       type="number"
                       required
                       min={1970}
-                      max={2030}
+                      max={2035}
                       value={graduationYear}
                       onChange={(e) => setGraduationYear(Number(e.target.value))}
                       className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-mono"
@@ -356,13 +393,13 @@ export default function ProfileForm({
 
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
-                  Alma Mater School Name
+                  Alma Mater / Higher Education Institution
                 </label>
                 <input
                   type="text"
                   required
                   maxLength={150}
-                  placeholder="e.g. Boston Institute of Technology"
+                  placeholder="e.g. Bangladesh University of Engineering and Technology (BUET), MIT..."
                   value={university}
                   onChange={(e) => setUniversity(e.target.value)}
                   className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400"
@@ -372,7 +409,7 @@ export default function ProfileForm({
               <div className="p-4 bg-stone-50 border border-stone-200 rounded-none flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <label className="font-serif font-bold text-sm text-stone-950">Available for Mentorship</label>
-                  <p className="text-xs text-stone-500">Allow students to search you and send structured connection requests.</p>
+                  <p className="text-xs text-stone-500">Allow students to view your profile and request friendly guidance.</p>
                 </div>
                 <input
                   type="checkbox"
@@ -383,78 +420,183 @@ export default function ProfileForm({
               </div>
             </div>
 
-            {/* Journey Fields */}
-            <div className="space-y-4 pt-6 border-t border-stone-200">
-              <h3 className="font-serif font-bold text-stone-900 text-sm">Your Professional Journey Story</h3>
-              <p className="text-xs text-stone-500 leading-snug">
-                Your journey replaces a generic resume with structured experiences. Answer these 4 simple prompts to guide mentees who want to walk the same path.
-              </p>
+            {/* Journey Interview Sections - 7 Questions */}
+            <div className="space-y-6 pt-2">
+              <div className="border-b border-stone-200 pb-3">
+                <h3 className="font-serif font-bold text-stone-900 text-lg">My Alumni Story Interview</h3>
+                <p className="text-xs text-stone-500 leading-relaxed">
+                  Our network profiles read like curated career interviews rather than a corporate résumé. Share your path to help inspire the next generation of students.
+                </p>
+              </div>
 
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-serif font-bold text-stone-700">
-                    1. What did you study, and how did you get to where you are now?
-                  </label>
-                  <textarea
-                    required
-                    maxLength={1000}
-                    rows={3}
-                    placeholder="Briefly describe your college majors, early work placements, or technical pivots..."
-                    value={whatTheyStudied}
-                    onChange={(e) => setWhatTheyStudied(e.target.value)}
-                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
-                  />
-                  <span className="block text-right text-[10px] font-mono text-stone-400">{whatTheyStudied.length}/1000</span>
+              {/* Question 1 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">1</span>
+                  <h4 className="font-serif font-bold text-sm">Tell us your story</h4>
                 </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-serif font-bold text-stone-700">
-                    2. What helped you most along the way?
-                  </label>
-                  <textarea
-                    required
-                    maxLength={1000}
-                    rows={3}
-                    placeholder="Specific skills, clubs, side-projects, open-source work, or teachers..."
-                    value={whatHelpedMost}
-                    onChange={(e) => setWhatHelpedMost(e.target.value)}
-                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
-                  />
-                  <span className="block text-right text-[10px] font-mono text-stone-400">{whatHelpedMost.length}/1000</span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-serif font-bold text-stone-700">
-                    3. What would you do differently?
-                  </label>
-                  <textarea
-                    required
-                    maxLength={1000}
-                    rows={3}
-                    placeholder="Mistakes, missed modules, things you over-focused on, or things you would skipped..."
-                    value={whatTheyWouldDoDifferently}
-                    onChange={(e) => setWhatTheyWouldDoDifferently(e.target.value)}
-                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
-                  />
-                  <span className="block text-right text-[10px] font-mono text-stone-400">{whatTheyWouldDoDifferently.length}/1000</span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-serif font-bold text-stone-700">
-                    4. One piece of advice for a student following this path?
-                  </label>
-                  <textarea
-                    required
-                    maxLength={1000}
-                    rows={3}
-                    placeholder="Your absolute best advice for students wanting to follow your career direction..."
-                    value={adviceForStudents}
-                    onChange={(e) => setAdviceForStudents(e.target.value)}
-                    className="w-full text-stone-900 bg-[#FCFAF6] border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
-                  />
-                  <span className="block text-right text-[10px] font-mono text-stone-400">{adviceForStudents.length}/1000</span>
+                <p className="text-xs text-stone-500 leading-snug">
+                  Briefly describe your journey after leaving school. You can mention your university, degree, career path, or any important milestones.
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="After leaving school, I decided to study Computer Science. I faced hurdles, but it led me to work as a Software Engineer at..."
+                  value={story}
+                  onChange={(e) => setStory(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(story)} words / {story.length} chars</span>
                 </div>
               </div>
+
+              {/* Question 2 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">2</span>
+                  <h4 className="font-serif font-bold text-sm">What helped you succeed?</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  What habits, decisions, opportunities or experiences made the biggest difference in your journey?
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="Being proactive, seeking out coding communities early, and devoting time to self-study outside of school hours..."
+                  value={whatHelpedSucceed}
+                  onChange={(e) => setWhatHelpedSucceed(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(whatHelpedSucceed)} words / {whatHelpedSucceed.length} chars</span>
+                </div>
+              </div>
+
+              {/* Question 3 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">3</span>
+                  <h4 className="font-serif font-bold text-sm">Biggest challenge</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  What was one major obstacle you faced, and how did you overcome it?
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="When I first moved to another city for higher education, the cultural shift and academic pressure felt intense, but I..."
+                  value={biggestChallenge}
+                  onChange={(e) => setBiggestChallenge(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(biggestChallenge)} words / {biggestChallenge.length} chars</span>
+                </div>
+              </div>
+
+              {/* Question 4 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">4</span>
+                  <h4 className="font-serif font-bold text-sm">If you could start again...</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  Looking back, what would you do differently if you were still a student?
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="If I could start again, I would focus much more on deep conceptual fundamentals instead of rote-memorizing frameworks..."
+                  value={startAgain}
+                  onChange={(e) => setStartAgain(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(startAgain)} words / {startAgain.length} chars</span>
+                </div>
+              </div>
+
+              {/* Question 5 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-amber-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">5</span>
+                  <h4 className="font-serif font-bold text-sm">Advice for current students</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  If you had only one piece of advice to give students at this school, what would it be?
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="Never stop asking why. Don't be afraid of asking stupid questions; they are always the fastest shortcut to clarity..."
+                  value={adviceForStudents}
+                  onChange={(e) => setAdviceForStudents(e.target.value)}
+                  className="w-full text-stone-900 bg-[#FCFAF6] border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(adviceForStudents)} words / {adviceForStudents.length} chars</span>
+                </div>
+              </div>
+
+              {/* Question 6 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">6</span>
+                  <h4 className="font-serif font-bold text-sm">Resources you recommend</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  Are there any books, websites, YouTube channels, courses or communities that genuinely helped you?
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="I highly recommend checking out 'The Pragmatic Programmer' book, Coursera's algorithms courses, and..."
+                  value={recommendedResources}
+                  onChange={(e) => setRecommendedResources(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(recommendedResources)} words / {recommendedResources.length} chars</span>
+                </div>
+              </div>
+
+              {/* Question 7 */}
+              <div className="bg-white border border-stone-200 rounded-none p-6 space-y-3 shadow-none">
+                <div className="flex items-center space-x-2.5 text-stone-800 border-b border-stone-100 pb-2">
+                  <span className="flex items-center justify-center w-6 h-6 bg-stone-900 text-white font-mono text-xs font-bold">7</span>
+                  <h4 className="font-serif font-bold text-sm">Fun fact</h4>
+                </div>
+                <p className="text-xs text-stone-500 leading-snug">
+                  Share something interesting about yourself outside academics or work (hobby, sport, travel, travel destination, unusual skill, book, etc.).
+                </p>
+                <textarea
+                  required
+                  maxLength={2500}
+                  rows={4}
+                  placeholder="I love playing standard classical chess and can play completely blindfolded, or I can bake a perfect Neapolitan pizza from scratch..."
+                  value={funFact}
+                  onChange={(e) => setFunFact(e.target.value)}
+                  className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none p-3 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+                />
+                <div className="flex justify-between items-center text-[10px] font-mono text-stone-400">
+                  <span>Aim for 100 - 400 words</span>
+                  <span>{getWordCount(funFact)} words / {funFact.length} chars</span>
+                </div>
+              </div>
+
             </div>
           </>
         )}

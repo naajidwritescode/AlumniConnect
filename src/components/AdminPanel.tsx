@@ -81,10 +81,24 @@ export default function AdminPanel({
           const userPromises = profilesList.map(async (item) => {
             const uSnap = await getDoc(doc(db, "users", item.profile.userId));
             if (uSnap.exists()) {
+              const rawProfile = item.profile as any;
+              const journey = {
+                story: rawProfile.journey?.story || rawProfile.journey?.whatTheyStudied || "",
+                whatHelpedSucceed: rawProfile.journey?.whatHelpedSucceed || rawProfile.journey?.whatHelpedMost || "",
+                biggestChallenge: rawProfile.journey?.biggestChallenge || rawProfile.journey?.howTheyGotThere || "",
+                startAgain: rawProfile.journey?.startAgain || rawProfile.journey?.whatTheyWouldDoDifferently || "",
+                adviceForStudents: rawProfile.journey?.adviceForStudents || "",
+                recommendedResources: rawProfile.journey?.recommendedResources || "",
+                funFact: rawProfile.journey?.funFact || ""
+              };
+              const mappedProfile: AlumniProfileDoc = {
+                ...rawProfile,
+                journey
+              };
               return {
                 uid: item.profile.userId,
                 user: uSnap.data() as UserDoc,
-                profile: item.profile
+                profile: mappedProfile
               };
             }
             return null;
@@ -304,30 +318,77 @@ export default function AdminPanel({
       </div>
 
       {/* Invite Members Link Widget */}
-      <div className="bg-white border border-stone-200 rounded-none p-6 shadow-none space-y-4">
+      <div className="bg-white border border-stone-200 rounded-none p-6 shadow-none space-y-6">
         <div className="space-y-1">
           <h3 className="text-base font-serif font-bold text-[#1C1A17]">Invite Members</h3>
           <p className="text-xs text-stone-500">
-            Copy this permanent, reusable invitation link to invite Current Students and Alumni to join this network.
+            Copy these permanent, reusable invitation links to invite current students and alumni to join your school network.
           </p>
         </div>
         
-        <div className="flex items-center space-x-2">
-          <input
-            type="text"
-            readOnly
-            value={`${window.location.origin}/join/${schoolId}`}
-            className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2.5 rounded-none focus:outline-none focus:ring-0"
-          />
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}`);
-              alert("Invitation link copied to clipboard!");
-            }}
-            className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-xs uppercase tracking-wider py-2.5 px-4 rounded-none transition-colors shrink-0 cursor-pointer"
-          >
-            Copy Link
-          </button>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">General Invite Link</span>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                readOnly
+                value={`${window.location.origin}/join/${schoolId}`}
+                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}`);
+                  alert("General invitation link copied!");
+                }}
+                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Student-Only Invite Link</span>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                readOnly
+                value={`${window.location.origin}/join/${schoolId}/student`}
+                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}/student`);
+                  alert("Student invitation link copied!");
+                }}
+                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Alumnus-Only Invite Link</span>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                readOnly
+                value={`${window.location.origin}/join/${schoolId}/alumnus`}
+                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}/alumnus`);
+                  alert("Alumnus invitation link copied!");
+                }}
+                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -480,22 +541,34 @@ export default function AdminPanel({
             </div>
 
             {/* Journey answers */}
-            <div className="space-y-4 text-sm leading-relaxed">
+            <div className="space-y-4 text-sm leading-relaxed max-h-[350px] overflow-y-auto pr-1">
               <div className="space-y-1">
-                <h5 className="font-serif font-bold text-stone-800 text-xs">1. What did you study, and how did you get to where you are now?</h5>
-                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans">{selectedReviewAlumni.profile.journey.whatTheyStudied}</p>
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">1. Tell us your story</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.story}</p>
               </div>
               <div className="space-y-1">
-                <h5 className="font-serif font-bold text-stone-800 text-xs">2. What helped you most along the way?</h5>
-                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans">{selectedReviewAlumni.profile.journey.whatHelpedMost}</p>
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">2. What helped you succeed?</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.whatHelpedSucceed}</p>
               </div>
               <div className="space-y-1">
-                <h5 className="font-serif font-bold text-stone-800 text-xs">3. What would you do differently?</h5>
-                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans">{selectedReviewAlumni.profile.journey.whatTheyWouldDoDifferently}</p>
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">3. Biggest challenge</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.biggestChallenge}</p>
               </div>
               <div className="space-y-1">
-                <h5 className="font-serif font-bold text-stone-800 text-xs text-amber-900">4. One piece of advice for a student following this path?</h5>
-                <p className="text-stone-900 bg-amber-50/50 p-3 rounded-none border border-amber-200 font-medium font-sans">{selectedReviewAlumni.profile.journey.adviceForStudents}</p>
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">4. If you could start again...</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.startAgain}</p>
+              </div>
+              <div className="space-y-1">
+                <h5 className="font-serif font-bold text-amber-800 text-xs uppercase tracking-wider">5. Advice for current students</h5>
+                <p className="text-stone-900 bg-amber-50/50 p-3 rounded-none border border-amber-200 font-medium font-sans whitespace-pre-wrap">"{selectedReviewAlumni.profile.journey.adviceForStudents}"</p>
+              </div>
+              <div className="space-y-1">
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">6. Resources you recommend</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.recommendedResources}</p>
+              </div>
+              <div className="space-y-1">
+                <h5 className="font-serif font-bold text-stone-800 text-xs text-stone-500 uppercase tracking-wider">7. Fun fact</h5>
+                <p className="text-stone-700 bg-stone-50/50 p-3 rounded-none border border-stone-200 font-sans whitespace-pre-wrap">{selectedReviewAlumni.profile.journey.funFact}</p>
               </div>
             </div>
 

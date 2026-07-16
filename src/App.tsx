@@ -57,6 +57,16 @@ import {
   EyeOff
 } from "lucide-react";
 
+function parseJoinPath(path: string): { schoolId: string | null; role: "student" | "alumnus" | null } {
+  if (!path.startsWith("/join/")) {
+    return { schoolId: null, role: null };
+  }
+  const parts = path.substring(6).split("/");
+  const schoolId = parts[0] || null;
+  const role = (parts[1] === "student" || parts[1] === "alumnus") ? (parts[1] as "student" | "alumnus") : null;
+  return { schoolId, role };
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loadingAuth, setLoadingAuth] = useState<boolean>(true);
@@ -69,14 +79,25 @@ export default function App() {
   // Invitation Routing States
   const [joiningSchoolId, setJoiningSchoolId] = useState<string | null>(() => {
     const path = window.location.pathname;
-    if (path.startsWith("/join/")) {
-      const id = path.split("/join/")[1] || null;
-      if (id) {
-        localStorage.setItem("alumniconnect_pending_join", id);
-        return id;
+    const parsed = parseJoinPath(path);
+    if (parsed.schoolId) {
+      sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
+      if (parsed.role) {
+        sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
+      } else {
+        sessionStorage.removeItem("alumniconnect_pending_join_role");
       }
+      return parsed.schoolId;
     }
-    return localStorage.getItem("alumniconnect_pending_join") || null;
+    return sessionStorage.getItem("alumniconnect_pending_join_id") || null;
+  });
+  const [joiningSchoolRole, setJoiningSchoolRole] = useState<"student" | "alumnus" | null>(() => {
+    const path = window.location.pathname;
+    const parsed = parseJoinPath(path);
+    if (parsed.schoolId) {
+      return parsed.role;
+    }
+    return (sessionStorage.getItem("alumniconnect_pending_join_role") as "student" | "alumnus") || null;
   });
   const [joiningSchoolDoc, setJoiningSchoolDoc] = useState<SchoolDoc | null>(null);
   const [checkingJoiningSchool, setCheckingJoiningSchool] = useState<boolean>(false);
@@ -344,16 +365,32 @@ export default function App() {
       }
     }
 
-    // B. Check if they opened an invite link but are ALREADY a member of that school
-    if (joiningSchoolId) {
-      const isAlreadyMember = myMemberships.some(m => m.schoolId === joiningSchoolId);
-      if (isAlreadyMember) {
-        setCurrentSchoolId(joiningSchoolId);
+    // B. Check if they opened an invite link
+    if (joiningSchoolId && !loadingMemberships) {
+      if (myMemberships.length > 0) {
+        // User already belongs to a school: ignore the invite link's school and role,
+        // and send them straight to their existing school's portal.
+        const isAlreadyMember = myMemberships.some(m => m.schoolId === joiningSchoolId);
+        if (isAlreadyMember) {
+          setCurrentSchoolId(joiningSchoolId);
+        } else {
+          // If already a member of a different school, select their first existing school
+          setCurrentSchoolId(myMemberships[0].schoolId);
+        }
         setJoiningSchoolId(null);
+        setJoiningSchoolRole(null);
+        sessionStorage.removeItem("alumniconnect_pending_join_id");
+        sessionStorage.removeItem("alumniconnect_pending_join_role");
         localStorage.removeItem("alumniconnect_pending_join");
+      } else {
+        // Brand-new user or user with no schoolId yet
+        if (joiningSchoolRole) {
+          // Auto-join the school with the pre-selected role from the URL
+          handleJoinSchool(joiningSchoolRole);
+        }
       }
     }
-  }, [currentUser, landingChoice, joiningSchoolId, mySchools, myMemberships]);
+  }, [currentUser, landingChoice, joiningSchoolId, joiningSchoolRole, mySchools, myMemberships, loadingMemberships]);
 
   // 5. Update currentSchoolDoc whenever currentSchoolId changes, and listen to role/approval status
   useEffect(() => {
@@ -445,13 +482,13 @@ export default function App() {
 
       if (!currentUser) {
         if (joiningSchoolId) {
-          targetPath = `/join/${joiningSchoolId}`;
+          targetPath = joiningSchoolRole ? `/join/${joiningSchoolId}/${joiningSchoolRole}` : `/join/${joiningSchoolId}`;
         } else {
           targetPath = "/login";
         }
       } else {
         if (joiningSchoolId) {
-          targetPath = `/join/${joiningSchoolId}`;
+          targetPath = joiningSchoolRole ? `/join/${joiningSchoolId}/${joiningSchoolRole}` : `/join/${joiningSchoolId}`;
         } else if (currentSchoolId) {
           if (currentTab === "profile") {
             targetPath = "/profile";
@@ -479,23 +516,29 @@ export default function App() {
     };
 
     handleUrlSync();
-  }, [currentUser, currentTab, joiningSchoolId, currentSchoolId]);
+  }, [currentUser, currentTab, joiningSchoolId, joiningSchoolRole, currentSchoolId]);
 
   // 8. Listen to browser Back/Forward (popstate) navigation events
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
       
-      // Parse joiningSchoolId from URL
-      if (path.startsWith("/join/")) {
-        const id = path.split("/join/")[1] || null;
-        if (id) {
-          setJoiningSchoolId(id);
-          localStorage.setItem("alumniconnect_pending_join", id);
+      // Parse joiningSchoolId and role from URL
+      const parsed = parseJoinPath(path);
+      if (parsed.schoolId) {
+        setJoiningSchoolId(parsed.schoolId);
+        setJoiningSchoolRole(parsed.role);
+        sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
+        if (parsed.role) {
+          sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
+        } else {
+          sessionStorage.removeItem("alumniconnect_pending_join_role");
         }
       } else {
         setJoiningSchoolId(null);
-        localStorage.removeItem("alumniconnect_pending_join");
+        setJoiningSchoolRole(null);
+        sessionStorage.removeItem("alumniconnect_pending_join_id");
+        sessionStorage.removeItem("alumniconnect_pending_join_role");
       }
 
       // Parse tabs
@@ -617,7 +660,7 @@ export default function App() {
     try {
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      console.error("Google sign in failed:", error);
+      console.warn("Google sign in failed:", error);
       const code = error?.code || "";
       const msg = error?.message || "";
       
@@ -636,9 +679,13 @@ export default function App() {
         setAuthError(
           "The Sign-In popup was blocked by your browser. Please enable popups, click the 'Open in New Tab' icon in the top-right corner, or use the email form."
         );
+      } else if (code === "auth/operation-not-allowed" || msg.includes("operation-not-allowed")) {
+        setAuthError(
+          "Google Sign-In is not enabled for this Firebase project. To enable it: Go to your Firebase Console -> Authentication -> Sign-in method, click 'Add new provider', and enable 'Google'."
+        );
       } else {
         setAuthError(
-          "Something went wrong. Check your connection and try again."
+          `Authentication failed: ${msg || code || "Check your connection and try again."}`
         );
       }
     } finally {
@@ -682,13 +729,21 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
-      console.error("Auth submit failed:", err);
+      console.warn("Auth submit failed:", err);
       const code = err?.code || "";
       const message = err?.message || "";
       
       let mappedError = "Something went wrong. Check your connection and try again.";
-      if (code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials") {
-        mappedError = "That password doesn't match this email. Try again or reset it.";
+      const isInvalidCred = 
+        code === "auth/wrong-password" || 
+        code === "auth/invalid-credential" || 
+        code === "auth/invalid-login-credentials" ||
+        message.includes("invalid-credential") ||
+        message.includes("invalid-login-credentials") ||
+        err?.toString().includes("invalid-credential");
+
+      if (isInvalidCred) {
+        mappedError = "Incorrect email or password. Please verify your credentials and try again, or reset your password below.";
       } else if (code === "auth/email-already-in-use") {
         mappedError = "An account already exists with this email. Try signing in instead.";
       } else if (code === "auth/user-not-found") {
@@ -696,7 +751,7 @@ export default function App() {
       } else if (code === "auth/weak-password") {
         mappedError = "Use at least 8 characters, including a number.";
       } else if (code === "auth/operation-not-allowed") {
-        mappedError = "Email & Password authentication is currently disabled for this network portal. Please enable it in your authentication setup console.";
+        mappedError = "Email & Password sign-in is not enabled for this Firebase project. To enable it: Go to your Firebase Console -> Authentication -> Sign-in method, click 'Add new provider', and enable 'Email/Password'.";
       }
       setAuthError(mappedError);
     } finally {
@@ -786,7 +841,7 @@ export default function App() {
     }
   };
 
-  const handleJoinSchool = async (selectedRole: "student" | "alumnus") => {
+  async function handleJoinSchool(selectedRole: "student" | "alumnus") {
     if (!currentUser || !joiningSchoolId) return;
     try {
       await setDoc(doc(db, "memberships", `${joiningSchoolId}_${currentUser.uid}`), {
@@ -806,13 +861,16 @@ export default function App() {
       }, { merge: true });
 
       localStorage.removeItem("alumniconnect_pending_join");
+      sessionStorage.removeItem("alumniconnect_pending_join_id");
+      sessionStorage.removeItem("alumniconnect_pending_join_role");
       setCurrentSchoolId(joiningSchoolId);
       setJoiningSchoolId(null);
+      setJoiningSchoolRole(null);
     } catch (err: any) {
       console.error(err);
       alert("Error joining school: " + err.message);
     }
-  };
+  }
 
   const handleResolvePaste = (e: React.FormEvent) => {
     e.preventDefault();

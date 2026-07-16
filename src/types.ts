@@ -32,11 +32,13 @@ export interface UserDoc {
 }
 
 export interface AlumniJourney {
-  whatTheyStudied: string;
-  howTheyGotThere: string;
-  whatHelpedMost: string;
-  whatTheyWouldDoDifferently: string;
-  adviceForStudents: string;
+  story: string; // Question 1: Tell us your story
+  whatHelpedSucceed: string; // Question 2: What helped you succeed?
+  biggestChallenge: string; // Question 3: Biggest challenge
+  startAgain: string; // Question 4: If you could start again...
+  adviceForStudents: string; // Question 5: Advice for current students
+  recommendedResources: string; // Question 6: Resources you recommend
+  funFact: string; // Question 7: Fun fact
 }
 
 export interface AlumniProfileDoc {
@@ -57,8 +59,9 @@ export interface AlumniProfileDoc {
 export interface StudentProfileDoc {
   userId?: string;
   schoolId?: string;
-  interestArea: string;
-  currentStage: string;
+  currentClass: string; // required dropdown (Class 7, Class 8, Class 9, Class 10, Class 11, Class 12)
+  intendedFieldOfStudy?: string; // optional text
+  shortIntroduction?: string; // optional text, ~200 characters limit
 }
 
 export interface MentorshipRequestDoc {
