@@ -28,7 +28,7 @@ export default function ProfileForm({
   const [displayName, setDisplayName] = useState(currentUserName);
 
   // Student Profile State
-  const [currentClass, setCurrentClass] = useState("Class 10");
+  const [currentClass, setCurrentClass] = useState("Class 10 (O Levels)");
   const [intendedFieldOfStudy, setIntendedFieldOfStudy] = useState("");
   const [shortIntroduction, setShortIntroduction] = useState("");
 
@@ -57,9 +57,9 @@ export default function ProfileForm({
     "Class 7",
     "Class 8",
     "Class 9",
-    "Class 10",
-    "Class 11",
-    "Class 12"
+    "Class 10 (O Levels)",
+    "Class 11 (A Levels Year 1)",
+    "Class 12 (A Levels Year 2)"
   ];
 
   const getWordCount = (text: string) => {

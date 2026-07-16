@@ -43,6 +43,7 @@ import {
   Megaphone, 
   Users, 
   ShieldCheck, 
+  ShieldAlert,
   Loader,
   Inbox,
   ArrowRight,
@@ -74,7 +75,6 @@ export default function App() {
   // Multi-Network States
   const [isFirstSetup, setIsFirstSetup] = useState<boolean>(false);
   const [checkingFirstSetup, setCheckingFirstSetup] = useState<boolean>(true);
-  const [resettingData, setResettingData] = useState<boolean>(false);
   
   // Invitation Routing States
   const [joiningSchoolId, setJoiningSchoolId] = useState<string | null>(() => {
@@ -172,58 +172,9 @@ export default function App() {
   const [setupSchoolDesc, setSetupSchoolDesc] = useState("");
   const [savingSetup, setSavingSetup] = useState(false);
 
-  // 1. On Mount: Check and reset database once, then check if schools exist to determine First-Time Setup
+  // 1. On Mount: Check if schools exist to determine First-Time Setup
   useEffect(() => {
     const runResetAndCheck = async () => {
-      const isResetDone = localStorage.getItem("alumniconnect_reset_v4");
-      if (isResetDone !== "true") {
-        setResettingData(true);
-        try {
-          // Log out previous sign ins
-          await signOut(auth);
-
-          // Clear previous documents from all collections to forget all portals/gmails
-          const collectionsToClear = [
-            "schools",
-            "memberships",
-            "users",
-            "alumniProfiles",
-            "studentProfiles",
-            "mentorshipRequests",
-            "conversations",
-            "opportunities",
-            "announcements"
-          ];
-
-          for (const colName of collectionsToClear) {
-            try {
-              const snap = await getDocs(collection(db, colName));
-              for (const document of snap.docs) {
-                if (colName === "conversations") {
-                  try {
-                    const msgSnap = await getDocs(collection(db, "conversations", document.id, "messages"));
-                    for (const mDoc of msgSnap.docs) {
-                      await deleteDoc(doc(db, "conversations", document.id, "messages", mDoc.id));
-                    }
-                  } catch (e) {
-                    console.error("Error deleting messages subcollection:", e);
-                  }
-                }
-                await deleteDoc(doc(db, colName, document.id));
-              }
-            } catch (err) {
-              console.error(`Error clearing collection ${colName}:`, err);
-            }
-          }
-
-          localStorage.setItem("alumniconnect_reset_v4", "true");
-        } catch (error) {
-          console.error("Error during database reset:", error);
-        } finally {
-          setResettingData(false);
-        }
-      }
-
       // Check if schools exist
       try {
         const snap = await getDocs(query(collection(db, "schools"), limit(1)));
@@ -367,26 +318,23 @@ export default function App() {
 
     // B. Check if they opened an invite link
     if (joiningSchoolId && !loadingMemberships) {
-      if (myMemberships.length > 0) {
-        // User already belongs to a school: ignore the invite link's school and role,
-        // and send them straight to their existing school's portal.
-        const isAlreadyMember = myMemberships.some(m => m.schoolId === joiningSchoolId);
-        if (isAlreadyMember) {
-          setCurrentSchoolId(joiningSchoolId);
-        } else {
-          // If already a member of a different school, select their first existing school
-          setCurrentSchoolId(myMemberships[0].schoolId);
-        }
+      const existingMembership = myMemberships.find(m => m.schoolId === joiningSchoolId);
+      if (existingMembership) {
+        // Already a member of this school: send them to this school's portal
+        setCurrentSchoolId(joiningSchoolId);
         setJoiningSchoolId(null);
         setJoiningSchoolRole(null);
         sessionStorage.removeItem("alumniconnect_pending_join_id");
         sessionStorage.removeItem("alumniconnect_pending_join_role");
         localStorage.removeItem("alumniconnect_pending_join");
       } else {
-        // Brand-new user or user with no schoolId yet
+        // Not a member of this school yet
         if (joiningSchoolRole) {
-          // Auto-join the school with the pre-selected role from the URL
+          // If a role was pre-selected in the URL, auto-join now
           handleJoinSchool(joiningSchoolRole);
+        } else {
+          // If no role is pre-selected, let the Case 1 render block do its work
+          // to let them choose whether they are a student or alumnus.
         }
       }
     }
@@ -878,45 +826,45 @@ export default function App() {
     const trimmed = pasteValue.trim();
     if (!trimmed) return;
 
-    let schoolId = trimmed;
+    let targetPath = trimmed;
     try {
       if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
         const url = new URL(trimmed);
-        const path = url.pathname;
-        if (path.includes("/join/")) {
-          const parts = path.split("/join/");
-          if (parts[1]?.trim()) {
-            schoolId = parts[1].trim();
-          }
-        }
+        targetPath = url.pathname;
       }
     } catch (e) {
       console.error("URL parsing error:", e);
     }
 
-    if (schoolId.startsWith("/join/")) {
-      const parts = schoolId.split("/join/");
-      schoolId = parts[1]?.trim() || schoolId;
+    if (!targetPath.startsWith("/join/")) {
+      if (targetPath.includes("/")) {
+        setPasteError("Please enter a valid invitation link or school identifier.");
+        return;
+      }
+      setJoiningSchoolId(targetPath);
+      setJoiningSchoolRole(null);
+      localStorage.setItem("alumniconnect_pending_join", targetPath);
+      sessionStorage.setItem("alumniconnect_pending_join_id", targetPath);
+      sessionStorage.removeItem("alumniconnect_pending_join_role");
+      return;
     }
 
-    if (!schoolId) {
+    const parsed = parseJoinPath(targetPath);
+    if (!parsed.schoolId) {
       setPasteError("Please enter a valid invitation link or school identifier.");
       return;
     }
 
-    setJoiningSchoolId(schoolId);
-    localStorage.setItem("alumniconnect_pending_join", schoolId);
+    setJoiningSchoolId(parsed.schoolId);
+    setJoiningSchoolRole(parsed.role);
+    localStorage.setItem("alumniconnect_pending_join", parsed.schoolId);
+    sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
+    if (parsed.role) {
+      sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
+    } else {
+      sessionStorage.removeItem("alumniconnect_pending_join_role");
+    }
   };
-
-  // Renders for different application states
-  if (resettingData) {
-    return (
-      <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
-        <Loader className="w-10 h-10 text-[#1C1A17] animate-spin mb-4" />
-        <span className="text-stone-500 text-xs font-mono tracking-wider uppercase">Resetting previous demo environments...</span>
-      </div>
-    );
-  }
 
   if (checkingFirstSetup || checkingJoiningSchool) {
     return (
@@ -928,7 +876,7 @@ export default function App() {
   }
 
   // Renders for different application states
-  if (loadingAuth || resettingData || checkingFirstSetup || checkingJoiningSchool) {
+  if (loadingAuth || checkingFirstSetup || checkingJoiningSchool) {
     return (
       <div className="min-h-screen bg-[#1E293B] flex flex-col items-center justify-center p-4">
         <div className="text-center space-y-4">
@@ -1416,6 +1364,43 @@ export default function App() {
 
   // CASE 1: DIRECT SCHOOL INVITATION ROLE SELECTION (For logged-in users who still need to choose role)
   if (joiningSchoolId) {
+    if (checkingJoiningSchool) {
+      return (
+        <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
+          <Loader className="w-8 h-8 text-[#1C1A17] animate-spin mb-4" />
+          <span className="text-stone-500 text-xs font-mono uppercase tracking-wider">Verifying invitation...</span>
+        </div>
+      );
+    }
+
+    if (!joiningSchoolDoc) {
+      return (
+        <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
+          <div className="bg-white border border-stone-200 rounded-none max-w-md w-full p-6 md:p-8 shadow-sm text-center space-y-4">
+            <div className="w-12 h-12 bg-red-50 text-red-700 border border-red-100 flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-serif font-bold text-stone-900">Invalid Invitation Link</h3>
+            <p className="text-xs text-stone-500 leading-relaxed">
+              This school network does not exist or the invitation has been deactivated. Please contact your school administrator.
+            </p>
+            <button
+              onClick={() => {
+                setJoiningSchoolId(null);
+                setJoiningSchoolRole(null);
+                sessionStorage.removeItem("alumniconnect_pending_join_id");
+                sessionStorage.removeItem("alumniconnect_pending_join_role");
+                localStorage.removeItem("alumniconnect_pending_join");
+              }}
+              className="w-full bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider py-3 rounded-none cursor-pointer"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
         <div className="bg-white border border-stone-200 rounded-none max-w-lg w-full p-6 md:p-8 shadow-sm space-y-6">

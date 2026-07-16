@@ -21,7 +21,8 @@ import {
   getDoc, 
   updateDoc, 
   setDoc,
-  getDocs 
+  getDocs,
+  deleteDoc
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { UserDoc, AlumniProfileDoc } from "../types";
@@ -55,6 +56,7 @@ export default function AdminPanel({
   // Settings form
   const [settingsName, setSettingsName] = useState(networkName);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [resettingSchool, setResettingSchool] = useState(false);
 
   // Selected alumnus journey drawer/modal
   const [selectedReviewAlumni, setSelectedReviewAlumni] = useState<AdminAlumniWithUser | null>(null);
@@ -203,6 +205,81 @@ export default function AdminPanel({
     }
   };
 
+  const handleResetSchoolData = async () => {
+    const confirmation = window.confirm(
+      "CRITICAL WARNING:\n\nAre you absolutely sure you want to reset this school network's data?\n\nThis will permanently delete all student and alumni profiles, announcements, mentorship requests, conversations, opportunities, and all other memberships of this school.\n\nYour own administrator membership will be preserved. This action is irreversible!"
+    );
+    if (!confirmation) return;
+
+    const finalConfirm = window.prompt(
+      "To confirm this action, please type the word 'RESET' below:"
+    );
+    if (finalConfirm !== "RESET") {
+      alert("Reset cancelled. Word did not match.");
+      return;
+    }
+
+    setResettingSchool(true);
+    try {
+      // 1. Delete alumniProfiles
+      const alumniSnap = await getDocs(query(collection(db, "alumniProfiles"), where("schoolId", "==", schoolId)));
+      for (const d of alumniSnap.docs) {
+        await deleteDoc(doc(db, "alumniProfiles", d.id));
+      }
+
+      // 2. Delete studentProfiles
+      const studentSnap = await getDocs(query(collection(db, "studentProfiles"), where("schoolId", "==", schoolId)));
+      for (const d of studentSnap.docs) {
+        await deleteDoc(doc(db, "studentProfiles", d.id));
+      }
+
+      // 3. Delete mentorshipRequests
+      const reqSnap = await getDocs(query(collection(db, "mentorshipRequests"), where("schoolId", "==", schoolId)));
+      for (const d of reqSnap.docs) {
+        await deleteDoc(doc(db, "mentorshipRequests", d.id));
+      }
+
+      // 4. Delete conversations (and their subcollection messages)
+      const convSnap = await getDocs(query(collection(db, "conversations"), where("schoolId", "==", schoolId)));
+      for (const d of convSnap.docs) {
+        const msgsSnap = await getDocs(collection(db, "conversations", d.id, "messages"));
+        for (const m of msgsSnap.docs) {
+          await deleteDoc(doc(db, "conversations", d.id, "messages", m.id));
+        }
+        await deleteDoc(doc(db, "conversations", d.id));
+      }
+
+      // 5. Delete opportunities
+      const oppSnap = await getDocs(query(collection(db, "opportunities"), where("schoolId", "==", schoolId)));
+      for (const d of oppSnap.docs) {
+        await deleteDoc(doc(db, "opportunities", d.id));
+      }
+
+      // 6. Delete announcements
+      const annSnap = await getDocs(query(collection(db, "announcements"), where("schoolId", "==", schoolId)));
+      for (const d of annSnap.docs) {
+        await deleteDoc(doc(db, "announcements", d.id));
+      }
+
+      // 7. Delete other memberships (preserving the current admin)
+      const memSnap = await getDocs(query(collection(db, "memberships"), where("schoolId", "==", schoolId)));
+      for (const d of memSnap.docs) {
+        const mData = d.data();
+        if (mData.userId !== currentUserId) {
+          await deleteDoc(doc(db, "memberships", d.id));
+        }
+      }
+
+      alert("School network data has been successfully reset. All guest profiles and contents are cleared.");
+      window.location.reload();
+    } catch (error) {
+      console.error("Error resetting school network data:", error);
+      alert("Failed to reset school network data. See console for error details.");
+    } finally {
+      setResettingSchool(false);
+    }
+  };
+
   const pendingQueue = alumni.filter(a => a.profile.approvalStatus === "pending");
   const approvedAlumni = alumni.filter(a => a.profile.approvalStatus === "approved");
 
@@ -251,6 +328,40 @@ export default function AdminPanel({
             </button>
           </div>
         </form>
+
+        {/* Danger Zone */}
+        <div className="bg-red-50/50 border border-red-200 rounded-none p-6 space-y-4">
+          <div className="flex items-start space-x-3 text-red-900">
+            <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5 text-red-700" />
+            <div className="text-xs space-y-1">
+              <p className="font-serif font-bold text-red-950 text-sm">Danger Zone: Reset School Network Data</p>
+              <p className="leading-relaxed text-stone-700">
+                This action will delete all alumni profiles, student profiles, mentorship requests, conversations, opportunities, announcements, and guest memberships associated with this school.
+              </p>
+              <p className="leading-relaxed text-red-800 font-bold">
+                Your own admin account and membership will be preserved. This cannot be undone.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleResetSchoolData}
+              disabled={resettingSchool}
+              className="bg-red-700 hover:bg-red-800 text-white font-mono text-xs uppercase tracking-wider px-4 py-3 rounded-none shadow-none transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center space-x-2"
+            >
+              {resettingSchool ? (
+                <>
+                  <Loader className="w-3.5 h-3.5 animate-spin" />
+                  <span>Resetting...</span>
+                </>
+              ) : (
+                <span>Reset School Data</span>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

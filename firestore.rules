@@ -1,9 +1,268 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permissive rules for development and reset workflows
-    match /{document=**} {
-      allow read, write: if true;
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(schoolId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/memberships/$(schoolId + "_" + request.auth.uid)) &&
+        get(/databases/$(database)/documents/memberships/$(schoolId + "_" + request.auth.uid)).data.status == "active";
+    }
+
+    function isAdminOf(schoolId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/memberships/$(schoolId + "_" + request.auth.uid)) &&
+        get(/databases/$(database)/documents/memberships/$(schoolId + "_" + request.auth.uid)).data.role == "admin" &&
+        get(/databases/$(database)/documents/memberships/$(schoolId + "_" + request.auth.uid)).data.status == "active";
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() < 128;
+    }
+
+    // Rules for schools
+    match /schools/{schoolId} {
+      allow read: if true; // public reading of schools is needed for portal routing and check existence before sign in
+      allow create: if isSignedIn() && isValidId(schoolId) &&
+        request.resource.data.id == schoolId &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.keys().hasOnly(['id', 'name', 'description', 'createdBy', 'createdAt']);
+      allow update: if isAdminOf(schoolId) &&
+        request.resource.data.createdBy == resource.data.createdBy &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.keys().hasOnly(['id', 'name', 'description', 'createdBy', 'createdAt']);
+      allow delete: if false; // schools cannot be deleted through client
+    }
+
+    // Rules for memberships
+    match /memberships/{membershipId} {
+      // Allow individual document retrievals (get)
+      allow get: if isSignedIn() && isValidId(membershipId) && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(membershipId) && isAdminOf(resource.data.schoolId);
+
+      // Split queries (list) into separate clean paths to prevent dynamic "get" validation issues
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && isAdminOf(resource.data.schoolId);
+
+      allow create: if isSignedIn() && isValidId(membershipId) &&
+        membershipId == (request.resource.data.schoolId + "_" + request.resource.data.userId) &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        // For first-setup, we allow status 'active' and role 'admin'
+        // For guests, they must request with status 'pending' and correct role
+        (request.resource.data.status == 'active' || request.resource.data.status == 'pending') &&
+        (request.resource.data.role == 'student' || request.resource.data.role == 'alumnus' || request.resource.data.role == 'admin') &&
+        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'role', 'status', 'createdAt']);
+      allow update: if isSignedIn() && isValidId(membershipId) &&
+        (
+          // Admin can update status and role of other members
+          (isAdminOf(resource.data.schoolId) && 
+           request.resource.data.schoolId == resource.data.schoolId &&
+           request.resource.data.userId == resource.data.userId &&
+           request.resource.data.createdAt == resource.data.createdAt &&
+           request.resource.data.keys().hasOnly(['schoolId', 'userId', 'role', 'status', 'createdAt']))
+          ||
+          // User themselves can cancel their membership (set to pending or delete is not allowed, but if we allow update, make sure they don't promote themselves)
+          (resource.data.userId == request.auth.uid &&
+           request.resource.data.role == resource.data.role &&
+           request.resource.data.status == resource.data.status &&
+           request.resource.data.schoolId == resource.data.schoolId &&
+           request.resource.data.userId == resource.data.userId &&
+           request.resource.data.createdAt == resource.data.createdAt &&
+           request.resource.data.keys().hasOnly(['schoolId', 'userId', 'role', 'status', 'createdAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(membershipId) &&
+        (resource.data.userId == request.auth.uid || isAdminOf(resource.data.schoolId));
+    }
+
+    // Rules for users (global profiles)
+    match /users/{uid} {
+      allow read: if isSignedIn() && isValidId(uid);
+      allow create: if isSignedIn() && isValidId(uid) && request.auth.uid == uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'role']);
+      allow update: if isSignedIn() && isValidId(uid) && request.auth.uid == uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        // Role cannot be updated by the user once set (self-promotion check)
+        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+        request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'role']);
+      allow delete: if false;
+    }
+
+    // Rules for alumni profiles
+    match /alumniProfiles/{profileId} {
+      allow get: if isSignedIn() && isValidId(profileId) && isMember(resource.data.schoolId) && (
+        resource.data.approvalStatus == 'approved' || 
+        resource.data.userId == request.auth.uid || 
+        isAdminOf(resource.data.schoolId)
+      );
+
+      // Rule 1: Anyone (member) can list approved profiles of the school
+      allow list: if isSignedIn() && isMember(resource.data.schoolId) && resource.data.approvalStatus == 'approved';
+
+      // Rule 2: Admin can list all profiles of the school (both approved and pending)
+      allow list: if isSignedIn() && isAdminOf(resource.data.schoolId);
+
+      allow create: if isSignedIn() && isValidId(profileId) &&
+        profileId == (request.resource.data.schoolId + "_" + request.resource.data.userId) &&
+        request.resource.data.userId == request.auth.uid &&
+        isMember(request.resource.data.schoolId) &&
+        request.resource.data.approvalStatus == 'pending' &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'graduationYear', 'university', 'degree', 'currentJobTitle', 'currentCompany', 'country', 'availableToMentor', 'approvalStatus', 'journey', 'updatedAt']);
+      allow update: if isSignedIn() && isValidId(profileId) &&
+        (
+          // Admin can approve or reject the profile
+          (isAdminOf(resource.data.schoolId) && 
+           request.resource.data.schoolId == resource.data.schoolId &&
+           request.resource.data.userId == resource.data.userId &&
+           request.resource.data.keys().hasOnly(['schoolId', 'userId', 'graduationYear', 'university', 'degree', 'currentJobTitle', 'currentCompany', 'country', 'availableToMentor', 'approvalStatus', 'journey', 'updatedAt']))
+          ||
+          // User can update their own profile, but status is reset or maintained (or they can't self-approve if currently pending)
+          (resource.data.userId == request.auth.uid &&
+           request.resource.data.schoolId == resource.data.schoolId &&
+           request.resource.data.userId == resource.data.userId &&
+           // Can't self-approve from pending to approved
+           (resource.data.approvalStatus == 'approved' ? request.resource.data.approvalStatus == 'approved' : request.resource.data.approvalStatus == 'pending') &&
+           request.resource.data.updatedAt == request.time &&
+           request.resource.data.keys().hasOnly(['schoolId', 'userId', 'graduationYear', 'university', 'degree', 'currentJobTitle', 'currentCompany', 'country', 'availableToMentor', 'approvalStatus', 'journey', 'updatedAt']))
+        );
+      allow delete: if isSignedIn() && isValidId(profileId) &&
+        (resource.data.userId == request.auth.uid || isAdminOf(resource.data.schoolId));
+    }
+
+    // Rules for student profiles
+    match /studentProfiles/{profileId} {
+      allow read: if isSignedIn() && isValidId(profileId) && isMember(resource.data.schoolId);
+      allow create: if isSignedIn() && isValidId(profileId) &&
+        profileId == (request.resource.data.schoolId + "_" + request.resource.data.userId) &&
+        request.resource.data.userId == request.auth.uid &&
+        isMember(request.resource.data.schoolId) &&
+        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'currentClass', 'intendedFieldOfStudy', 'shortIntroduction']);
+      allow update: if isSignedIn() && isValidId(profileId) &&
+        (resource.data.userId == request.auth.uid || isAdminOf(resource.data.schoolId)) &&
+        request.resource.data.schoolId == resource.data.schoolId &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'currentClass', 'intendedFieldOfStudy', 'shortIntroduction']);
+      allow delete: if isSignedIn() && isValidId(profileId) &&
+        (resource.data.userId == request.auth.uid || isAdminOf(resource.data.schoolId));
+    }
+
+    // Rules for mentorship requests
+    match /mentorshipRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (
+        resource.data.studentId == request.auth.uid || 
+        resource.data.alumnusId == request.auth.uid || 
+        isAdminOf(resource.data.schoolId)
+      );
+
+      // Split listing rules so query shapes are statically verifiable
+      allow list: if isSignedIn() && resource.data.studentId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.alumnusId == request.auth.uid;
+      allow list: if isSignedIn() && isAdminOf(resource.data.schoolId);
+
+      allow create: if isSignedIn() && isValidId(requestId) &&
+        isMember(request.resource.data.schoolId) &&
+        request.resource.data.studentId == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.keys().hasOnly(['studentId', 'alumnusId', 'message', 'status', 'createdAt', 'respondedAt', 'schoolId', 'requestId']);
+      allow update: if isSignedIn() && isValidId(requestId) &&
+        (
+          // Alumnus accepts/declines the request
+          (resource.data.alumnusId == request.auth.uid &&
+           request.resource.data.schoolId == resource.data.schoolId &&
+           request.resource.data.studentId == resource.data.studentId &&
+           request.resource.data.alumnusId == resource.data.alumnusId &&
+           request.resource.data.createdAt == resource.data.createdAt &&
+           request.resource.data.respondedAt == request.time &&
+           (request.resource.data.status == 'accepted' || request.resource.data.status == 'declined') &&
+           request.resource.data.keys().hasOnly(['studentId', 'alumnusId', 'message', 'status', 'createdAt', 'respondedAt', 'schoolId', 'requestId']))
+        );
+      allow delete: if isSignedIn() && isValidId(requestId) &&
+        (resource.data.studentId == request.auth.uid || isAdminOf(resource.data.schoolId));
+    }
+
+    // Rules for conversations
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && (
+        request.auth.uid in resource.data.participantIds || 
+        isAdminOf(resource.data.schoolId)
+      );
+
+      // Split listing rules for conversations
+      allow list: if isSignedIn() && request.auth.uid in resource.data.participantIds;
+      allow list: if isSignedIn() && isAdminOf(resource.data.schoolId);
+
+      allow create: if isSignedIn() && isValidId(conversationId) &&
+        isMember(request.resource.data.schoolId) &&
+        request.auth.uid in request.resource.data.participantIds &&
+        request.resource.data.lastMessageAt == request.time &&
+        request.resource.data.keys().hasOnly(['schoolId', 'participantIds', 'lastMessageAt', 'conversationId']);
+      allow update: if isSignedIn() && isValidId(conversationId) &&
+        (request.auth.uid in resource.data.participantIds) &&
+        request.resource.data.schoolId == resource.data.schoolId &&
+        request.resource.data.participantIds == resource.data.participantIds &&
+        request.resource.data.lastMessageAt == request.time &&
+        request.resource.data.keys().hasOnly(['schoolId', 'participantIds', 'lastMessageAt', 'conversationId']);
+      allow delete: if isSignedIn() && isValidId(conversationId) && isAdminOf(resource.data.schoolId);
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && isValidId(messageId) &&
+          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds ||
+           isAdminOf(get(/databases/$(database)/documents/conversations/$(conversationId)).data.schoolId));
+        allow create: if isSignedIn() && isValidId(messageId) &&
+          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds) &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.sentAt == request.time &&
+          request.resource.data.keys().hasOnly(['senderId', 'text', 'sentAt', 'messageId']);
+        allow update, delete: if false; // message editing/deleting disabled
+      }
+    }
+
+    // Rules for opportunities
+    match /opportunities/{oppId} {
+      allow read: if isSignedIn() && isValidId(oppId) && isMember(resource.data.schoolId);
+      allow create: if isSignedIn() && isValidId(oppId) &&
+        isMember(request.resource.data.schoolId) &&
+        request.resource.data.postedBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.keys().hasOnly(['schoolId', 'postedBy', 'postedByName', 'type', 'title', 'description', 'externalLink', 'deadline', 'createdAt']);
+      allow update: if isSignedIn() && isValidId(oppId) &&
+        (resource.data.postedBy == request.auth.uid || isAdminOf(resource.data.schoolId)) &&
+        request.resource.data.schoolId == resource.data.schoolId &&
+        request.resource.data.postedBy == resource.data.postedBy &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.keys().hasOnly(['schoolId', 'postedBy', 'postedByName', 'type', 'title', 'description', 'externalLink', 'deadline', 'createdAt']);
+      allow delete: if isSignedIn() && isValidId(oppId) &&
+        (resource.data.postedBy == request.auth.uid || isAdminOf(resource.data.schoolId));
+    }
+
+    // Rules for announcements
+    match /announcements/{annId} {
+      allow read: if isSignedIn() && isValidId(annId) && isMember(resource.data.schoolId);
+      allow create: if isSignedIn() && isValidId(annId) &&
+        isAdminOf(request.resource.data.schoolId) &&
+        request.resource.data.postedBy == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.keys().hasOnly(['postedBy', 'title', 'description', 'eventDate', 'location', 'createdAt', 'schoolId', 'announcementId']);
+      allow update: if isSignedIn() && isValidId(annId) &&
+        isAdminOf(resource.data.schoolId) &&
+        request.resource.data.schoolId == resource.data.schoolId &&
+        request.resource.data.postedBy == resource.data.postedBy &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.keys().hasOnly(['postedBy', 'title', 'description', 'eventDate', 'location', 'createdAt', 'schoolId', 'announcementId']);
+      allow delete: if isSignedIn() && isValidId(annId) && isAdminOf(resource.data.schoolId);
     }
   }
 }
