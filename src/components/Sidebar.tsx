@@ -11,7 +11,8 @@ import {
   LogOut, 
   Menu, 
   X,
-  Sparkles
+  Sparkles,
+  GraduationCap
 } from "lucide-react";
 import { UserRole } from "../types";
 
@@ -25,6 +26,7 @@ interface SidebarProps {
   onLogout: () => void;
   pendingRequestsCount?: number;
   onSwitchNetwork?: () => void;
+  alumniStatus?: string | null;
 }
 
 export default function Sidebar({
@@ -36,17 +38,26 @@ export default function Sidebar({
   userPhoto,
   onLogout,
   pendingRequestsCount = 0,
-  onSwitchNetwork
+  onSwitchNetwork,
+  alumniStatus = null
 }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const getMenuItems = () => {
+    const isPendingAlumnus = role === "alumnus" && alumniStatus !== "approved";
+
     const items = [
       { id: "dashboard", label: "Dashboard", icon: Sparkles, roles: ["student", "alumnus", "admin"] },
-      { id: "directory", label: "Alumni Directory", icon: Users, roles: ["student", "alumnus", "admin"] },
-      { id: "opportunities", label: "Opportunity Board", icon: Briefcase, roles: ["student", "alumnus", "admin"] },
-      { id: "announcements", label: "Announcements", icon: Megaphone, roles: ["student", "alumnus", "admin"] },
     ];
+
+    if (!isPendingAlumnus) {
+      items.push(
+        { id: "directory", label: "Alumni Directory", icon: Users, roles: ["student", "alumnus", "admin"] },
+        { id: "student-directory", label: "Student Directory", icon: GraduationCap, roles: ["student", "alumnus", "admin"] },
+        { id: "opportunities", label: "Opportunity Board", icon: Briefcase, roles: ["student", "alumnus", "admin"] },
+        { id: "announcements", label: "Announcements", icon: Megaphone, roles: ["student", "alumnus", "admin"] }
+      );
+    }
 
     if (role === "student") {
       items.push(
@@ -57,11 +68,17 @@ export default function Sidebar({
     }
 
     if (role === "alumnus") {
-      items.push(
-        { id: "requests", label: "Mentorship Requests", icon: Inbox, roles: ["alumnus"] },
-        { id: "messages", label: "Messages", icon: MessageSquare, roles: ["alumnus"] },
-        { id: "profile", label: "My Profile & Journey", icon: User, roles: ["alumnus"] }
-      );
+      if (isPendingAlumnus) {
+        items.push(
+          { id: "profile", label: "My Profile & Journey", icon: User, roles: ["alumnus"] }
+        );
+      } else {
+        items.push(
+          { id: "requests", label: "Mentorship Requests", icon: Inbox, roles: ["alumnus"] },
+          { id: "messages", label: "Messages", icon: MessageSquare, roles: ["alumnus"] },
+          { id: "profile", label: "My Profile & Journey", icon: User, roles: ["alumnus"] }
+        );
+      }
     }
 
     if (role === "admin") {

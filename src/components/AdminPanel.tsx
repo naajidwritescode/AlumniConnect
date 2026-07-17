@@ -33,10 +33,12 @@ interface AdminPanelProps {
   setNetworkName: (name: string) => void;
   activeSection: "manage-alumni" | "settings";
   schoolId: string;
+  schoolCode: string;
 }
 
 interface AdminAlumniWithUser {
   uid: string;
+  docId: string;
   user: UserDoc;
   profile: AlumniProfileDoc;
 }
@@ -46,7 +48,8 @@ export default function AdminPanel({
   networkName, 
   setNetworkName,
   activeSection,
-  schoolId
+  schoolId,
+  schoolCode
 }: AdminPanelProps) {
   const [alumni, setAlumni] = useState<AdminAlumniWithUser[]>([]);
   const [studentsCount, setStudentsCount] = useState(0);
@@ -55,6 +58,9 @@ export default function AdminPanel({
 
   // Settings form
   const [settingsName, setSettingsName] = useState(networkName);
+  const [settingsCountry, setSettingsCountry] = useState("");
+  const [settingsCity, setSettingsCity] = useState("");
+  const [settingsLogoUrl, setSettingsLogoUrl] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [resettingSchool, setResettingSchool] = useState(false);
 
@@ -63,6 +69,19 @@ export default function AdminPanel({
 
   useEffect(() => {
     if (!schoolId) return;
+
+    // Load detailed school settings
+    getDoc(doc(db, "schools", schoolId)).then((snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as any;
+        setSettingsName(data.name || "");
+        setSettingsCountry(data.country || "");
+        setSettingsCity(data.city || "");
+        setSettingsLogoUrl(data.logoUrl || "");
+      }
+    }).catch(err => {
+      console.error("Error loading school details:", err);
+    });
 
     setLoading(true);
 
@@ -99,6 +118,7 @@ export default function AdminPanel({
               };
               return {
                 uid: item.profile.userId,
+                docId: item.docId,
                 user: uSnap.data() as UserDoc,
                 profile: mappedProfile
               };
@@ -151,9 +171,9 @@ export default function AdminPanel({
     };
   }, [schoolId]);
 
-  const handleApproveProfile = async (userId: string) => {
+  const handleApproveProfile = async (userId: string, docId: string) => {
     try {
-      await updateDoc(doc(db, "alumniProfiles", `${schoolId}_${userId}`), {
+      await updateDoc(doc(db, "alumniProfiles", docId), {
         approvalStatus: "approved"
       });
       await updateDoc(doc(db, "memberships", `${schoolId}_${userId}`), {
@@ -162,23 +182,23 @@ export default function AdminPanel({
       alert("Alumni profile approved successfully!");
       setSelectedReviewAlumni(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `alumniProfiles/${schoolId}_${userId}`);
+      handleFirestoreError(error, OperationType.WRITE, `alumniProfiles/${docId}`);
     }
   };
 
-  const handleRejectProfile = async (userId: string) => {
+  const handleRejectProfile = async (userId: string, docId: string) => {
     if (!window.confirm("Are you sure you want to reject this alumni profile?")) return;
     try {
-      await updateDoc(doc(db, "alumniProfiles", `${schoolId}_${userId}`), {
+      await updateDoc(doc(db, "alumniProfiles", docId), {
         approvalStatus: "rejected"
       });
       await updateDoc(doc(db, "memberships", `${schoolId}_${userId}`), {
-        status: "rejected"
+        status: "revoked"
       });
-      alert("Alumni profile status set to rejected.");
+      alert("Alumni profile status set to rejected & access revoked.");
       setSelectedReviewAlumni(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `alumniProfiles/${schoolId}_${userId}`);
+      handleFirestoreError(error, OperationType.WRITE, `alumniProfiles/${docId}`);
     }
   };
 
@@ -194,7 +214,10 @@ export default function AdminPanel({
     setSavingSettings(true);
     try {
       await updateDoc(doc(db, "schools", schoolId), {
-        name: settingsName.trim()
+        name: settingsName.trim(),
+        country: settingsCountry.trim(),
+        city: settingsCity.trim(),
+        logoUrl: settingsLogoUrl.trim()
       });
       setNetworkName(settingsName.trim());
       alert("School network settings updated successfully!");
@@ -317,6 +340,48 @@ export default function AdminPanel({
             <p className="text-[11px] text-stone-400 mt-1 font-sans">This name will be displayed in the header, title, and onboarding screens for all members.</p>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                Country
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. United States"
+                value={settingsCountry}
+                onChange={(e) => setSettingsCountry(e.target.value)}
+                className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                City / Region
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. New York"
+                value={settingsCity}
+                onChange={(e) => setSettingsCity(e.target.value)}
+                className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+              School Logo Image URL (Optional)
+            </label>
+            <input
+              type="url"
+              placeholder="e.g. https://example.com/logo.png"
+              value={settingsLogoUrl}
+              onChange={(e) => setSettingsLogoUrl(e.target.value)}
+              className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none focus:ring-1 focus:ring-stone-400 font-sans"
+            />
+            <p className="text-[11px] text-stone-400 mt-1 font-sans">Provide an image URL to show the school logo in the header and onboarding.</p>
+          </div>
+
           <div className="flex justify-end pt-2">
             <button
               type="submit"
@@ -428,77 +493,58 @@ export default function AdminPanel({
         </div>
       </div>
 
-      {/* Invite Members Link Widget */}
+      {/* School Access Code and QR Code Widget */}
       <div className="bg-white border border-stone-200 rounded-none p-6 shadow-none space-y-6">
         <div className="space-y-1">
-          <h3 className="text-base font-serif font-bold text-[#1C1A17]">Invite Members</h3>
+          <h3 className="text-base font-serif font-bold text-[#1C1A17]">School Access Code</h3>
           <p className="text-xs text-stone-500">
-            Copy these permanent, reusable invitation links to invite current students and alumni to join your school network.
+            Share this permanent, unique School Code or the QR Code with your students and alumni to let them join this school network.
           </p>
         </div>
-        
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">General Invite Link</span>
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/join/${schoolId}`}
-                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}`);
-                  alert("General invitation link copied!");
-                }}
-                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
-              >
-                Copy
-              </button>
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center border-t border-stone-100 pt-6">
+          {/* Code and Steps */}
+          <div className="md:col-span-7 space-y-5">
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Permanent School Code</span>
+              <div className="flex items-center space-x-2">
+                <div className="flex-1 bg-stone-50 border border-stone-200 px-4 py-3 font-mono text-xl font-bold text-stone-900 select-all tracking-wider">
+                  {schoolCode}
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(schoolCode);
+                    alert("School code copied to clipboard!");
+                  }}
+                  className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-xs uppercase tracking-wider py-4 px-5 rounded-none transition-colors shrink-0 cursor-pointer"
+                >
+                  Copy Code
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 bg-stone-50 border border-stone-200 text-xs text-stone-600 leading-relaxed space-y-2">
+              <span className="font-bold text-stone-900 block uppercase font-mono text-[9px] tracking-wider">How users join:</span>
+              <ol className="list-decimal list-inside space-y-1.5 font-sans">
+                <li>Sign in or register for an AlumniConnect account.</li>
+                <li>Click <strong className="text-stone-900">Join Existing School</strong>.</li>
+                <li>Enter this School Code <strong className="text-stone-900 font-mono text-xs">{schoolCode}</strong> and select their registration role.</li>
+              </ol>
             </div>
           </div>
 
-          <div className="space-y-2">
-            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Student-Only Invite Link</span>
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/join/${schoolId}/student`}
-                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
+          {/* QR Code */}
+          <div className="md:col-span-5 flex flex-col items-center justify-center p-5 bg-stone-50 border border-stone-200 rounded-none space-y-3">
+            <span className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider block">Join Portal QR Code</span>
+            <div className="bg-white p-3 border border-stone-200 shadow-sm shrink-0">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(schoolCode)}`}
+                alt="School Code QR"
+                className="w-36 h-36"
+                referrerPolicy="no-referrer"
               />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}/student`);
-                  alert("Student invitation link copied!");
-                }}
-                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
-              >
-                Copy
-              </button>
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Alumnus-Only Invite Link</span>
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                readOnly
-                value={`${window.location.origin}/join/${schoolId}/alumnus`}
-                className="flex-1 bg-stone-50 border border-stone-200 text-stone-700 font-mono text-xs px-3 py-2 rounded-none focus:outline-none focus:ring-0"
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/join/${schoolId}/alumnus`);
-                  alert("Alumnus invitation link copied!");
-                }}
-                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono text-[10px] uppercase tracking-wider py-2 px-3 rounded-none transition-colors shrink-0 cursor-pointer"
-              >
-                Copy
-              </button>
-            </div>
+            <p className="text-[9px] text-stone-500 font-mono uppercase tracking-wider text-center">Scan to copy School Code</p>
           </div>
         </div>
       </div>
@@ -552,14 +598,14 @@ export default function AdminPanel({
 
                   <div className="flex space-x-2">
                     <button
-                      onClick={() => handleRejectProfile(al.uid)}
+                      onClick={() => handleRejectProfile(al.uid, al.docId)}
                       className="p-1 text-stone-400 hover:text-stone-900 hover:bg-stone-50 rounded-none transition-colors cursor-pointer"
                       title="Reject registration"
                     >
                       <XCircle className="w-5 h-5" />
                     </button>
                     <button
-                      onClick={() => handleApproveProfile(al.uid)}
+                      onClick={() => handleApproveProfile(al.uid, al.docId)}
                       className="bg-[#1C1A17] hover:bg-[#2E2B27] text-white text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded-none transition-colors flex items-center space-x-1 shadow-none cursor-pointer"
                     >
                       <CheckCircle className="w-4 h-4" />
@@ -606,7 +652,7 @@ export default function AdminPanel({
                     Approved
                   </span>
                   <button
-                    onClick={() => handleRejectProfile(al.uid)}
+                    onClick={() => handleRejectProfile(al.uid, al.docId)}
                     className="text-xs text-stone-400 hover:text-stone-900 font-mono uppercase tracking-wider transition-colors cursor-pointer"
                   >
                     Revoke Approval
@@ -685,13 +731,13 @@ export default function AdminPanel({
 
             <div className="flex justify-end space-x-3 pt-3 border-t border-stone-200">
               <button
-                onClick={() => handleRejectProfile(selectedReviewAlumni.uid)}
+                onClick={() => handleRejectProfile(selectedReviewAlumni.uid, selectedReviewAlumni.docId)}
                 className="px-4 py-2 border border-stone-200 text-stone-600 rounded-none text-xs font-mono uppercase tracking-wider hover:bg-stone-50 cursor-pointer"
               >
                 Reject / Deny Approval
               </button>
               <button
-                onClick={() => handleApproveProfile(selectedReviewAlumni.uid)}
+                onClick={() => handleApproveProfile(selectedReviewAlumni.uid, selectedReviewAlumni.docId)}
                 className="bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs uppercase tracking-wider px-5 py-2 rounded-none shadow-none cursor-pointer"
               >
                 Approve Registration

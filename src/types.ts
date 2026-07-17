@@ -2,16 +2,19 @@ export interface SchoolDoc {
   id: string;
   name: string;
   logoUrl?: string;
+  country?: string;
+  city?: string;
   description: string;
   createdBy: string;
   createdAt: any;
+  schoolCode: string;
 }
 
 export interface MembershipDoc {
   schoolId: string;
   userId: string;
   role: UserRole;
-  status: "active" | "pending" | "approved" | "rejected";
+  status: "active" | "pending" | "approved" | "rejected" | "revoked";
   createdAt: any;
 }
 

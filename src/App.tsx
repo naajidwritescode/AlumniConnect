@@ -28,6 +28,7 @@ import { UserRole, UserDoc, SchoolDoc, MembershipDoc } from "./types";
 // Components
 import Sidebar from "./components/Sidebar";
 import DirectoryView from "./components/DirectoryView";
+import StudentDirectoryView from "./components/StudentDirectoryView";
 import OpportunityView from "./components/OpportunityView";
 import AnnouncementView from "./components/AnnouncementView";
 import RequestsView from "./components/RequestsView";
@@ -58,16 +59,6 @@ import {
   EyeOff
 } from "lucide-react";
 
-function parseJoinPath(path: string): { schoolId: string | null; role: "student" | "alumnus" | null } {
-  if (!path.startsWith("/join/")) {
-    return { schoolId: null, role: null };
-  }
-  const parts = path.substring(6).split("/");
-  const schoolId = parts[0] || null;
-  const role = (parts[1] === "student" || parts[1] === "alumnus") ? (parts[1] as "student" | "alumnus") : null;
-  return { schoolId, role };
-}
-
 export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [loadingAuth, setLoadingAuth] = useState<boolean>(true);
@@ -76,29 +67,9 @@ export default function App() {
   const [isFirstSetup, setIsFirstSetup] = useState<boolean>(false);
   const [checkingFirstSetup, setCheckingFirstSetup] = useState<boolean>(true);
   
-  // Invitation Routing States
-  const [joiningSchoolId, setJoiningSchoolId] = useState<string | null>(() => {
-    const path = window.location.pathname;
-    const parsed = parseJoinPath(path);
-    if (parsed.schoolId) {
-      sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
-      if (parsed.role) {
-        sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
-      } else {
-        sessionStorage.removeItem("alumniconnect_pending_join_role");
-      }
-      return parsed.schoolId;
-    }
-    return sessionStorage.getItem("alumniconnect_pending_join_id") || null;
-  });
-  const [joiningSchoolRole, setJoiningSchoolRole] = useState<"student" | "alumnus" | null>(() => {
-    const path = window.location.pathname;
-    const parsed = parseJoinPath(path);
-    if (parsed.schoolId) {
-      return parsed.role;
-    }
-    return (sessionStorage.getItem("alumniconnect_pending_join_role") as "student" | "alumnus") || null;
-  });
+  // Joining School States (via School Code)
+  const [joiningSchoolId, setJoiningSchoolId] = useState<string | null>(null);
+  const [joiningSchoolRole, setJoiningSchoolRole] = useState<"student" | "alumnus" | null>(null);
   const [joiningSchoolDoc, setJoiningSchoolDoc] = useState<SchoolDoc | null>(null);
   const [checkingJoiningSchool, setCheckingJoiningSchool] = useState<boolean>(false);
 
@@ -115,6 +86,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [isOnboarding, setIsOnboarding] = useState<boolean>(false);
   const [alumniStatus, setAlumniStatus] = useState<"pending" | "approved" | "rejected" | null>(null);
+  const [revocationStatus, setRevocationStatus] = useState<"revoked" | "rejected" | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
   // Navigation
@@ -125,6 +97,7 @@ export default function App() {
     if (path === "/opportunities") return "opportunities";
     if (path === "/announcements") return "announcements";
     if (path === "/directory") return "directory";
+    if (path === "/student-directory") return "student-directory";
     if (path === "/requests") return "requests";
     return "dashboard";
   });
@@ -163,14 +136,18 @@ export default function App() {
   const [forgotSuccess, setForgotSuccess] = useState(false);
   const [forgotError, setForgotError] = useState("");
   
-  // Paste invite link inputs
-  const [pasteValue, setPasteValue] = useState("");
-  const [pasteError, setPasteError] = useState("");
+  // School Code inputs
+  const [enteredSchoolCode, setEnteredSchoolCode] = useState("");
+  const [schoolCodeError, setSchoolCodeError] = useState("");
 
   // Setup form
   const [setupSchoolName, setSetupSchoolName] = useState("");
   const [setupSchoolDesc, setSetupSchoolDesc] = useState("");
+  const [setupCountry, setSetupCountry] = useState("");
+  const [setupCity, setSetupCity] = useState("");
+  const [setupLogoUrl, setSetupLogoUrl] = useState("");
   const [savingSetup, setSavingSetup] = useState(false);
+  const [resolvingCode, setResolvingCode] = useState(false);
 
   // 1. On Mount: Check if schools exist to determine First-Time Setup
   useEffect(() => {
@@ -268,12 +245,33 @@ export default function App() {
         const membershipsList: MembershipDoc[] = [];
         for (const docSnap of snapshot.docs) {
           const mData = docSnap.data() as MembershipDoc;
+          if (mData.status === "revoked" || mData.status === "rejected") {
+            continue;
+          }
           membershipsList.push(mData);
           const sSnap = await getDoc(doc(db, "schools", mData.schoolId));
           if (sSnap.exists()) {
+            const sData = sSnap.data() as SchoolDoc;
+            let code = sData.schoolCode;
+            if (!code) {
+              const prefix = sData.name
+                .replace(/[^a-zA-Z]/g, "")
+                .substring(0, 3)
+                .toUpperCase() || "SCH";
+              const num = Math.floor(1000 + Math.random() * 9000);
+              code = `${prefix}-${num}`;
+              try {
+                await updateDoc(doc(db, "schools", mData.schoolId), {
+                  schoolCode: code
+                });
+              } catch (e) {
+                console.warn("Could not write missing schoolCode:", e);
+              }
+            }
             schoolsList.push({
-              ...sSnap.data() as SchoolDoc,
-              id: sSnap.id
+              ...sData,
+              id: sSnap.id,
+              schoolCode: code
             });
           }
         }
@@ -342,11 +340,14 @@ export default function App() {
 
   // 5. Update currentSchoolDoc whenever currentSchoolId changes, and listen to role/approval status
   useEffect(() => {
+    let unsubAlumni: (() => void) | null = null;
+
     if (!currentSchoolId || !currentUser) {
       setCurrentSchool(null);
       setUserRole(null);
       setAlumniStatus(null);
       setIsOnboarding(false);
+      setRevocationStatus(null);
       return;
     }
 
@@ -363,8 +364,21 @@ export default function App() {
     // Listen to membership role for this school
     const mRef = doc(db, "memberships", `${currentSchoolId}_${currentUser.uid}`);
     const unsubMembership = onSnapshot(mRef, async (mSnap) => {
+      // Clean up previous alumni listener if any
+      if (unsubAlumni) {
+        unsubAlumni();
+        unsubAlumni = null;
+      }
+
       if (mSnap.exists()) {
         const mData = mSnap.data() as MembershipDoc;
+        if (mData.status === "revoked" || mData.status === "rejected") {
+          setUserRole(null);
+          setAlumniStatus(null);
+          setRevocationStatus(mData.status);
+          return;
+        }
+        setRevocationStatus(null);
         setUserRole(mData.role);
 
         // Check onboarding status
@@ -378,7 +392,7 @@ export default function App() {
         } else if (mData.role === "alumnus") {
           // Listen to alumni profile for approval status
           const aRef = doc(db, "alumniProfiles", `${currentSchoolId}_${currentUser.uid}`);
-          const unsubAlumni = onSnapshot(aRef, (aSnap) => {
+          unsubAlumni = onSnapshot(aRef, (aSnap) => {
             if (aSnap.exists()) {
               const aData = aSnap.data() as any;
               setAlumniStatus(aData.approvalStatus || "pending");
@@ -387,7 +401,6 @@ export default function App() {
               setIsOnboarding(true);
             }
           });
-          return () => unsubAlumni();
         } else if (mData.role === "admin") {
           setIsOnboarding(false);
         }
@@ -395,10 +408,16 @@ export default function App() {
         // No membership yet for this school - might be joining
         setUserRole(null);
         setAlumniStatus(null);
+        setRevocationStatus(null);
       }
     });
 
-    return () => unsubMembership();
+    return () => {
+      unsubMembership();
+      if (unsubAlumni) {
+        unsubAlumni();
+      }
+    };
   }, [currentSchoolId, currentUser]);
 
   // 6. Listen to pending mentorship requests count for current approved Alumnus
@@ -429,15 +448,9 @@ export default function App() {
       let targetPath = "/";
 
       if (!currentUser) {
-        if (joiningSchoolId) {
-          targetPath = joiningSchoolRole ? `/join/${joiningSchoolId}/${joiningSchoolRole}` : `/join/${joiningSchoolId}`;
-        } else {
-          targetPath = "/login";
-        }
+        targetPath = "/login";
       } else {
-        if (joiningSchoolId) {
-          targetPath = joiningSchoolRole ? `/join/${joiningSchoolId}/${joiningSchoolRole}` : `/join/${joiningSchoolId}`;
-        } else if (currentSchoolId) {
+        if (currentSchoolId) {
           if (currentTab === "profile") {
             targetPath = "/profile";
           } else if (currentTab === "messages") {
@@ -448,6 +461,8 @@ export default function App() {
             targetPath = "/announcements";
           } else if (currentTab === "directory") {
             targetPath = "/directory";
+          } else if (currentTab === "student-directory") {
+            targetPath = "/student-directory";
           } else if (currentTab === "requests") {
             targetPath = "/requests";
           } else {
@@ -464,30 +479,12 @@ export default function App() {
     };
 
     handleUrlSync();
-  }, [currentUser, currentTab, joiningSchoolId, joiningSchoolRole, currentSchoolId]);
+  }, [currentUser, currentTab, currentSchoolId]);
 
   // 8. Listen to browser Back/Forward (popstate) navigation events
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname;
-      
-      // Parse joiningSchoolId and role from URL
-      const parsed = parseJoinPath(path);
-      if (parsed.schoolId) {
-        setJoiningSchoolId(parsed.schoolId);
-        setJoiningSchoolRole(parsed.role);
-        sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
-        if (parsed.role) {
-          sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
-        } else {
-          sessionStorage.removeItem("alumniconnect_pending_join_role");
-        }
-      } else {
-        setJoiningSchoolId(null);
-        setJoiningSchoolRole(null);
-        sessionStorage.removeItem("alumniconnect_pending_join_id");
-        sessionStorage.removeItem("alumniconnect_pending_join_role");
-      }
 
       // Parse tabs
       if (path === "/profile") {
@@ -500,6 +497,8 @@ export default function App() {
         setCurrentTab("announcements");
       } else if (path === "/directory") {
         setCurrentTab("directory");
+      } else if (path === "/student-directory") {
+        setCurrentTab("student-directory");
       } else if (path === "/requests") {
         setCurrentTab("requests");
       } else if (path === "/dashboard" || path === "/") {
@@ -524,6 +523,8 @@ export default function App() {
         setCurrentTab("announcements");
       } else if (initialRedirectPath === "/directory") {
         setCurrentTab("directory");
+      } else if (initialRedirectPath === "/student-directory") {
+        setCurrentTab("student-directory");
       } else if (initialRedirectPath === "/requests") {
         setCurrentTab("requests");
       }
@@ -755,10 +756,23 @@ export default function App() {
     setSavingSetup(true);
     try {
       const schoolId = `school_${Date.now()}`;
+      
+      // Auto-generate permanent unique School Code
+      const prefix = setupSchoolName
+        .replace(/[^a-zA-Z]/g, "")
+        .substring(0, 3)
+        .toUpperCase() || "SCH";
+      const num = Math.floor(1000 + Math.random() * 9000);
+      const schoolCode = `${prefix}-${num}`;
+
       await setDoc(doc(db, "schools", schoolId), {
         id: schoolId,
         name: setupSchoolName.trim(),
         description: setupSchoolDesc.trim() || "Private School Directory and Mentorship network.",
+        schoolCode,
+        country: setupCountry.trim(),
+        city: setupCity.trim(),
+        logoUrl: setupLogoUrl.trim() || "",
         createdBy: currentUser.uid,
         createdAt: Timestamp.now()
       });
@@ -820,49 +834,59 @@ export default function App() {
     }
   }
 
-  const handleResolvePaste = (e: React.FormEvent) => {
+  const handleResolvePaste = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPasteError("");
-    const trimmed = pasteValue.trim();
+    setSchoolCodeError("");
+    const trimmed = enteredSchoolCode.trim();
     if (!trimmed) return;
 
-    let targetPath = trimmed;
+    setResolvingCode(true);
     try {
-      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-        const url = new URL(trimmed);
-        targetPath = url.pathname;
-      }
-    } catch (e) {
-      console.error("URL parsing error:", e);
-    }
+      const codeToSearch = trimmed.toUpperCase();
+      const q = query(collection(db, "schools"), where("schoolCode", "==", codeToSearch));
+      const snap = await getDocs(q);
 
-    if (!targetPath.startsWith("/join/")) {
-      if (targetPath.includes("/")) {
-        setPasteError("Please enter a valid invitation link or school identifier.");
+      if (snap.empty) {
+        setSchoolCodeError("School code not found. Please contact your administrator.");
         return;
       }
-      setJoiningSchoolId(targetPath);
+
+      const schoolDoc = snap.docs[0].data() as SchoolDoc;
+      const matchedSchoolId = schoolDoc.id;
+
+      // Verify if user already has a membership in this school
+      const mRef = doc(db, "memberships", `${matchedSchoolId}_${currentUser!.uid}`);
+      const mSnap = await getDoc(mRef);
+      if (mSnap.exists()) {
+        const mData = mSnap.data() as MembershipDoc;
+        if (mData.status === "revoked") {
+          setSchoolCodeError("Your membership access in this school has been revoked by the administrator.");
+          return;
+        }
+        if (mData.status === "rejected") {
+          setSchoolCodeError("Your join request for this school has been rejected by the administrator.");
+          return;
+        }
+        if (mData.status === "pending") {
+          setSchoolCodeError("Your registration request for this school is currently pending approval.");
+          return;
+        }
+        if (mData.status === "active") {
+          // They are already an active member, auto-switch to this school portal!
+          setCurrentSchoolId(matchedSchoolId);
+          setEnteredSchoolCode("");
+          setLandingChoice(null);
+          return;
+        }
+      }
+
+      setJoiningSchoolId(matchedSchoolId);
       setJoiningSchoolRole(null);
-      localStorage.setItem("alumniconnect_pending_join", targetPath);
-      sessionStorage.setItem("alumniconnect_pending_join_id", targetPath);
-      sessionStorage.removeItem("alumniconnect_pending_join_role");
-      return;
-    }
-
-    const parsed = parseJoinPath(targetPath);
-    if (!parsed.schoolId) {
-      setPasteError("Please enter a valid invitation link or school identifier.");
-      return;
-    }
-
-    setJoiningSchoolId(parsed.schoolId);
-    setJoiningSchoolRole(parsed.role);
-    localStorage.setItem("alumniconnect_pending_join", parsed.schoolId);
-    sessionStorage.setItem("alumniconnect_pending_join_id", parsed.schoolId);
-    if (parsed.role) {
-      sessionStorage.setItem("alumniconnect_pending_join_role", parsed.role);
-    } else {
-      sessionStorage.removeItem("alumniconnect_pending_join_role");
+    } catch (err: any) {
+      console.error("Error looking up school code:", err);
+      setSchoolCodeError("Failed to lookup code: " + err.message);
+    } finally {
+      setResolvingCode(false);
     }
   };
 
@@ -1497,9 +1521,46 @@ export default function App() {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Country</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. United States"
+                      value={setupCountry}
+                      onChange={(e) => setSetupCountry(e.target.value)}
+                      className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">City / Region</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Boston"
+                      value={setupCity}
+                      onChange={(e) => setSetupCity(e.target.value)}
+                      className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">School Logo URL (Optional)</label>
+                  <input
+                    type="url"
+                    placeholder="e.g. https://example.com/logo.png"
+                    value={setupLogoUrl}
+                    onChange={(e) => setSetupLogoUrl(e.target.value)}
+                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2 text-sm focus:bg-white focus:outline-none"
+                  />
+                </div>
+
                 <button
                   type="submit"
-                  disabled={savingSetup || !setupSchoolName.trim()}
+                  disabled={savingSetup || !setupSchoolName.trim() || !setupCountry.trim() || !setupCity.trim()}
                   className="w-full bg-[#1C1A17] hover:bg-[#2E2B27] text-[#FAF7F2] font-mono font-bold uppercase tracking-wide text-xs py-3 rounded-none shadow-sm transition-colors flex items-center justify-center space-x-2"
                 >
                   {savingSetup ? <Loader className="w-4 h-4 animate-spin" /> : <span>Initialize Portal</span>}
@@ -1527,38 +1588,45 @@ export default function App() {
                 <Users className="w-10 h-10 text-stone-700 mx-auto" />
                 <h2 className="text-2xl font-serif font-bold text-stone-900 tracking-tight">Join Existing School</h2>
                 <p className="text-xs text-stone-500 leading-relaxed">
-                  Enter your school's active invitation link or school identifier below.
+                  Enter your school's unique permanent Access Code to join and select your network role.
                 </p>
               </div>
 
-              {pasteError && (
+              {schoolCodeError && (
                 <div className="p-3 bg-red-50 text-red-700 text-xs rounded-none border border-red-100">
-                  {pasteError}
+                  {schoolCodeError}
                 </div>
               )}
 
               <form onSubmit={handleResolvePaste} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">Paste Invitation Link</label>
+                  <label className="block text-[10px] font-mono font-bold text-stone-500 uppercase tracking-wider">School Access Code</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. http://localhost:3000/join/school_123 or just school_123"
-                    value={pasteValue}
+                    placeholder="e.g. BIT-8492"
+                    value={enteredSchoolCode}
                     onChange={(e) => {
-                      setPasteValue(e.target.value);
-                      setPasteError("");
+                      setEnteredSchoolCode(e.target.value);
+                      setSchoolCodeError("");
                     }}
-                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2.5 text-xs focus:bg-white focus:outline-none"
+                    className="w-full text-stone-900 bg-stone-50 border border-stone-200 rounded-none px-3 py-2.5 font-mono text-sm tracking-wider uppercase focus:bg-white focus:outline-none"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider py-3 rounded-none flex items-center justify-center space-x-2 cursor-pointer shadow-sm"
+                  disabled={resolvingCode || !enteredSchoolCode.trim()}
+                  className="w-full bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider py-3 rounded-none flex items-center justify-center space-x-2 cursor-pointer shadow-sm disabled:opacity-50"
                 >
-                  <span>Resolve Link & Continue</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {resolvingCode ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <span>Join Network</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               </form>
 
@@ -1738,6 +1806,60 @@ export default function App() {
     );
   }
 
+  // Access Revoked/Denied Screen
+  if (currentSchoolId && revocationStatus) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF6] flex flex-col items-center justify-center p-4">
+        <div className="bg-white border border-stone-200 rounded-none max-w-md w-full p-6 md:p-8 shadow-sm text-center space-y-6">
+          <div className="w-12 h-12 bg-red-50 text-red-700 border border-red-100 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-serif font-bold text-stone-900">
+              {revocationStatus === "revoked" ? "Access Revoked" : "Access Denied"}
+            </h3>
+            <p className="text-xs text-stone-500 leading-relaxed">
+              {revocationStatus === "revoked" 
+                ? "Your membership access to this school network has been revoked by the portal administrator. If you believe this is an error, please contact your school administrator."
+                : "Your registration request to join this school network has been rejected by the administrator."}
+            </p>
+          </div>
+          <div className="space-y-2 pt-2">
+            {mySchools.length > 1 && (
+              <button
+                onClick={() => {
+                  setRevocationStatus(null);
+                  setCurrentSchoolId(null);
+                }}
+                className="w-full bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider py-3 rounded-none cursor-pointer"
+              >
+                Switch School Portal
+              </button>
+            )}
+            <button
+              onClick={handleLogout}
+              className="w-full border border-stone-200 hover:bg-stone-50 text-stone-800 font-mono text-xs font-semibold uppercase tracking-wider py-3 rounded-none cursor-pointer"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render a clean loading/resolving screen if school portal is active but role hasn't resolved yet
+  if (currentSchoolId && userRole === null) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF6] flex items-center justify-center p-4">
+        <div className="text-center space-y-4">
+          <Loader className="w-8 h-8 text-stone-800 animate-spin mx-auto" />
+          <p className="font-mono text-xs uppercase tracking-wider text-stone-500">Resolving Portal Membership...</p>
+        </div>
+      </div>
+    );
+  }
+
   // DASHBOARD LAYOUT & VIEW ROUTING
   const renderDashboardView = () => {
     if (userRole === "admin") {
@@ -1760,6 +1882,7 @@ export default function App() {
           <AdminPanel 
             currentUserId={currentUser.uid}
             schoolId={currentSchoolId!}
+            schoolCode={currentSchool?.schoolCode || ""}
             networkName={currentSchool?.name || "School Hub"}
             setNetworkName={() => {}}
             activeSection="manage-alumni"
@@ -1912,12 +2035,26 @@ export default function App() {
   };
 
   const renderActiveTabContent = () => {
+    // Prevent pending alumnus from querying any other tabs
+    const isPendingAlumnus = userRole === "alumnus" && alumniStatus !== "approved";
+    if (isPendingAlumnus && currentTab !== "dashboard" && currentTab !== "profile") {
+      return renderDashboardView();
+    }
+
     switch (currentTab) {
       case "dashboard":
         return renderDashboardView();
       case "directory":
         return (
           <DirectoryView 
+            currentUserId={currentUser.uid}
+            currentUserRole={userRole!}
+            schoolId={currentSchoolId!}
+          />
+        );
+      case "student-directory":
+        return (
+          <StudentDirectoryView 
             currentUserId={currentUser.uid}
             currentUserRole={userRole!}
             schoolId={currentSchoolId!}
@@ -1977,6 +2114,7 @@ export default function App() {
           <AdminPanel 
             currentUserId={currentUser.uid}
             schoolId={currentSchoolId!}
+            schoolCode={currentSchool?.schoolCode || ""}
             networkName={currentSchool?.name || "School Hub"}
             setNetworkName={() => {}}
             activeSection="manage-alumni"
@@ -1987,6 +2125,7 @@ export default function App() {
           <AdminPanel 
             currentUserId={currentUser.uid}
             schoolId={currentSchoolId!}
+            schoolCode={currentSchool?.schoolCode || ""}
             networkName={currentSchool?.name || "School Hub"}
             setNetworkName={() => {}}
             activeSection="settings"
@@ -2009,6 +2148,7 @@ export default function App() {
         onLogout={handleLogout}
         pendingRequestsCount={pendingRequestsCount}
         onSwitchNetwork={mySchools.length > 1 ? () => setCurrentSchoolId(null) : undefined}
+        alumniStatus={alumniStatus}
       />
 
       <main className="flex-1 min-w-0 p-4 md:p-8 lg:p-10 pt-20 lg:pt-10 overflow-y-auto">
