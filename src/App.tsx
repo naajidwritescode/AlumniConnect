@@ -20,7 +20,8 @@ import {
   collection, 
   query, 
   where,
-  limit
+  limit,
+  runTransaction
 } from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "./lib/firebase";
 import { UserRole, UserDoc, SchoolDoc, MembershipDoc } from "./types";
@@ -86,6 +87,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [isOnboarding, setIsOnboarding] = useState<boolean>(false);
   const [alumniStatus, setAlumniStatus] = useState<"pending" | "approved" | "rejected" | null>(null);
+  const [membershipStatus, setMembershipStatus] = useState<"pending" | "active" | "revoked" | "rejected" | null>(null);
   const [revocationStatus, setRevocationStatus] = useState<"revoked" | "rejected" | null>(null);
   const [pendingRequestsCount, setPendingRequestsCount] = useState<number>(0);
 
@@ -221,6 +223,7 @@ export default function App() {
         setCurrentSchool(null);
         setUserRole(null);
         setAlumniStatus(null);
+        setMembershipStatus(null);
         setIsOnboarding(false);
         setLoadingAuth(false);
       }
@@ -252,26 +255,9 @@ export default function App() {
           const sSnap = await getDoc(doc(db, "schools", mData.schoolId));
           if (sSnap.exists()) {
             const sData = sSnap.data() as SchoolDoc;
-            let code = sData.schoolCode;
-            if (!code) {
-              const prefix = sData.name
-                .replace(/[^a-zA-Z]/g, "")
-                .substring(0, 3)
-                .toUpperCase() || "SCH";
-              const num = Math.floor(1000 + Math.random() * 9000);
-              code = `${prefix}-${num}`;
-              try {
-                await updateDoc(doc(db, "schools", mData.schoolId), {
-                  schoolCode: code
-                });
-              } catch (e) {
-                console.warn("Could not write missing schoolCode:", e);
-              }
-            }
             schoolsList.push({
               ...sData,
-              id: sSnap.id,
-              schoolCode: code
+              id: sSnap.id
             });
           }
         }
@@ -346,6 +332,7 @@ export default function App() {
       setCurrentSchool(null);
       setUserRole(null);
       setAlumniStatus(null);
+      setMembershipStatus(null);
       setIsOnboarding(false);
       setRevocationStatus(null);
       return;
@@ -372,6 +359,7 @@ export default function App() {
 
       if (mSnap.exists()) {
         const mData = mSnap.data() as MembershipDoc;
+        setMembershipStatus(mData.status);
         if (mData.status === "revoked" || mData.status === "rejected") {
           setUserRole(null);
           setAlumniStatus(null);
@@ -408,6 +396,7 @@ export default function App() {
         // No membership yet for this school - might be joining
         setUserRole(null);
         setAlumniStatus(null);
+        setMembershipStatus(null);
         setRevocationStatus(null);
       }
     });
@@ -756,33 +745,44 @@ export default function App() {
     setSavingSetup(true);
     try {
       const schoolId = `school_${Date.now()}`;
-      
-      // Auto-generate permanent unique School Code
-      const prefix = setupSchoolName
-        .replace(/[^a-zA-Z]/g, "")
-        .substring(0, 3)
-        .toUpperCase() || "SCH";
-      const num = Math.floor(1000 + Math.random() * 9000);
-      const schoolCode = `${prefix}-${num}`;
+      const prefix = setupSchoolName.replace(/[^a-zA-Z]/g, "").substring(0, 3).toUpperCase() || "SCH";
 
-      await setDoc(doc(db, "schools", schoolId), {
-        id: schoolId,
-        name: setupSchoolName.trim(),
-        description: setupSchoolDesc.trim() || "Private School Directory and Mentorship network.",
-        schoolCode,
-        country: setupCountry.trim(),
-        city: setupCity.trim(),
-        logoUrl: setupLogoUrl.trim() || "",
-        createdBy: currentUser.uid,
-        createdAt: Timestamp.now()
-      });
+      await runTransaction(db, async (transaction) => {
+        let code = "";
+        let codeRef;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          const candidate = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
+          const candidateRef = doc(db, "schoolCodes", candidate);
+          const candidateSnap = await transaction.get(candidateRef);
+          if (!candidateSnap.exists()) {
+            code = candidate;
+            codeRef = candidateRef;
+            break;
+          }
+        }
+        if (!code || !codeRef) {
+          throw new Error("Could not generate a unique school code, please try again.");
+        }
 
-      await setDoc(doc(db, "memberships", `${schoolId}_${currentUser.uid}`), {
-        schoolId,
-        userId: currentUser.uid,
-        role: "admin",
-        status: "active",
-        createdAt: Timestamp.now()
+        transaction.set(codeRef, { schoolId });
+        transaction.set(doc(db, "schools", schoolId), {
+          id: schoolId,
+          name: setupSchoolName.trim(),
+          description: setupSchoolDesc.trim() || "Private School Directory and Mentorship network.",
+          schoolCode: code,
+          country: setupCountry.trim(),
+          city: setupCity.trim(),
+          logoUrl: setupLogoUrl.trim() || "",
+          createdBy: currentUser.uid,
+          createdAt: Timestamp.now()
+        });
+        transaction.set(doc(db, "memberships", `${schoolId}_${currentUser.uid}`), {
+          schoolId,
+          userId: currentUser.uid,
+          role: "admin",
+          status: "active",
+          createdAt: Timestamp.now()
+        });
       });
 
       await setDoc(doc(db, "users", currentUser.uid), {
@@ -810,7 +810,7 @@ export default function App() {
         schoolId: joiningSchoolId,
         userId: currentUser.uid,
         role: selectedRole,
-        status: selectedRole === "student" ? "active" : "pending",
+        status: "pending",
         createdAt: Timestamp.now()
       });
 
@@ -843,16 +843,12 @@ export default function App() {
     setResolvingCode(true);
     try {
       const codeToSearch = trimmed.toUpperCase();
-      const q = query(collection(db, "schools"), where("schoolCode", "==", codeToSearch));
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
+      const codeSnap = await getDoc(doc(db, "schoolCodes", codeToSearch));
+      if (!codeSnap.exists()) {
         setSchoolCodeError("School code not found. Please contact your administrator.");
         return;
       }
-
-      const schoolDoc = snap.docs[0].data() as SchoolDoc;
-      const matchedSchoolId = schoolDoc.id;
+      const matchedSchoolId = codeSnap.data().schoolId as string;
 
       // Verify if user already has a membership in this school
       const mRef = doc(db, "memberships", `${matchedSchoolId}_${currentUser!.uid}`);
@@ -1976,68 +1972,95 @@ export default function App() {
     }
 
     // STUDENT DASHBOARD VIEW
+    const isApproved = membershipStatus === "active";
+
     return (
-      <div className="space-y-8">
-        <div className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-2 text-center md:text-left">
-            <h3 className="text-2xl font-serif font-bold text-stone-900 tracking-tight">Find Your Mentor Path</h3>
-            <p className="text-sm text-stone-500 max-w-xl leading-relaxed">
-              Don't navigate career searches alone. Connect 1:1 with approved {currentSchool?.name} alumni who have walked the same path.
-            </p>
-          </div>
-          <button
-            onClick={() => setCurrentTab("directory")}
-            className="bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider px-5 py-3.5 rounded-none shadow-none transition-colors shrink-0 flex items-center space-x-2 cursor-pointer"
-          >
-            <Users className="w-4 h-4" />
-            <span>Search Alumni Directory</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="space-y-4">
-            <div className="flex justify-between items-center border-b border-stone-200 pb-2">
-              <h3 className="font-serif font-bold text-stone-900 text-base flex items-center space-x-2">
-                <Briefcase className="w-4 h-4 text-stone-400" />
-                <span>Recent Career Listings</span>
-              </h3>
-              <button onClick={() => setCurrentTab("opportunities")} className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 underline">
-                View All
+      <div className="space-y-6">
+        {!isApproved ? (
+          <div className="bg-amber-50/40 border border-stone-200 rounded-none p-6 shadow-none space-y-4 max-w-3xl">
+            <div className="flex items-start space-x-3 text-amber-900">
+              <Loader className="w-5 h-5 shrink-0 mt-0.5 animate-spin" />
+              <div className="text-xs space-y-1">
+                <p className="font-serif font-bold text-stone-900">Your Student Registration is Under Review</p>
+                <p className="leading-relaxed text-stone-600">
+                  An administrator of {currentSchool?.name} will verify your student enrollment details shortly. Approved students can access the full alumni directory, request mentorship, and participate in peer groups.
+                </p>
+              </div>
+            </div>
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setCurrentTab("profile")}
+                className="bg-[#1C1A17] text-[#FAF7F2] font-mono text-[10px] font-bold uppercase tracking-wider px-4 py-2 rounded-none hover:bg-[#2E2B27] transition-colors cursor-pointer"
+              >
+                Edit Profile Journey
               </button>
             </div>
-            <OpportunityView 
-              currentUserId={currentUser.uid} 
-              currentUserRole="student"
-              currentUserName={currentUser.displayName || "Student"}
-              schoolId={currentSchoolId!}
-            />
           </div>
-
-          <div className="space-y-4">
-            <div className="flex justify-between items-center border-b border-stone-200 pb-2">
-              <h3 className="font-serif font-bold text-stone-900 text-base flex items-center space-x-2">
-                <Megaphone className="w-4 h-4 text-stone-400" />
-                <span>School Announcements</span>
-              </h3>
-              <button onClick={() => setCurrentTab("announcements")} className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 underline">
-                View All
+        ) : (
+          <div className="space-y-8">
+            <div className="bg-white border border-stone-200 rounded-none p-6 md:p-8 shadow-none flex flex-col md:flex-row items-center justify-between gap-6">
+              <div className="space-y-2 text-center md:text-left">
+                <h3 className="text-2xl font-serif font-bold text-stone-900 tracking-tight">Find Your Mentor Path</h3>
+                <p className="text-sm text-stone-500 max-w-xl leading-relaxed">
+                  Don't navigate career searches alone. Connect 1:1 with approved {currentSchool?.name} alumni who have walked the same path.
+                </p>
+              </div>
+              <button
+                onClick={() => setCurrentTab("directory")}
+                className="bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-xs font-semibold uppercase tracking-wider px-5 py-3.5 rounded-none shadow-none transition-colors shrink-0 flex items-center space-x-2 cursor-pointer"
+              >
+                <Users className="w-4 h-4" />
+                <span>Search Alumni Directory</span>
               </button>
             </div>
-            <AnnouncementView 
-              currentUserId={currentUser.uid} 
-              currentUserRole="student"
-              schoolId={currentSchoolId!}
-            />
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-stone-200 pb-2">
+                  <h3 className="font-serif font-bold text-stone-900 text-base flex items-center space-x-2">
+                    <Briefcase className="w-4 h-4 text-stone-400" />
+                    <span>Recent Career Listings</span>
+                  </h3>
+                  <button onClick={() => setCurrentTab("opportunities")} className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 underline">
+                    View All
+                  </button>
+                </div>
+                <OpportunityView 
+                  currentUserId={currentUser.uid} 
+                  currentUserRole="student"
+                  currentUserName={currentUser.displayName || "Student"}
+                  schoolId={currentSchoolId!}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-stone-200 pb-2">
+                  <h3 className="font-serif font-bold text-stone-900 text-base flex items-center space-x-2">
+                    <Megaphone className="w-4 h-4 text-stone-400" />
+                    <span>School Announcements</span>
+                  </h3>
+                  <button onClick={() => setCurrentTab("announcements")} className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-700 hover:text-amber-900 underline">
+                    View All
+                  </button>
+                </div>
+                <AnnouncementView 
+                  currentUserId={currentUser.uid} 
+                  currentUserRole="student"
+                  schoolId={currentSchoolId!}
+                />
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   };
 
   const renderActiveTabContent = () => {
-    // Prevent pending alumnus from querying any other tabs
+    // Prevent pending alumnus or student from querying any other tabs
     const isPendingAlumnus = userRole === "alumnus" && alumniStatus !== "approved";
-    if (isPendingAlumnus && currentTab !== "dashboard" && currentTab !== "profile") {
+    const isPendingStudent = userRole === "student" && membershipStatus !== "active";
+    if ((isPendingAlumnus || isPendingStudent) && currentTab !== "dashboard" && currentTab !== "profile") {
       return renderDashboardView();
     }
 

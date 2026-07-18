@@ -52,6 +52,7 @@ export default function AdminPanel({
   schoolCode
 }: AdminPanelProps) {
   const [alumni, setAlumni] = useState<AdminAlumniWithUser[]>([]);
+  const [pendingStudents, setPendingStudents] = useState<any[]>([]);
   const [studentsCount, setStudentsCount] = useState(0);
   const [mentorshipsCount, setMentorshipsCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -164,10 +165,45 @@ export default function AdminPanel({
       }
     );
 
+    // 4. Listen to pending student memberships
+    const unsubPendingStudents = onSnapshot(
+      query(
+        collection(db, "memberships"),
+        where("schoolId", "==", schoolId),
+        where("role", "==", "student"),
+        where("status", "==", "pending")
+      ),
+      async (snapshot) => {
+        try {
+          const list: any[] = [];
+          for (const docSnap of snapshot.docs) {
+            const mData = docSnap.data();
+            const uSnap = await getDoc(doc(db, "users", mData.userId));
+            const pSnap = await getDoc(doc(db, "studentProfiles", `${schoolId}_${mData.userId}`));
+            if (uSnap.exists()) {
+              list.push({
+                userId: mData.userId,
+                membershipId: docSnap.id,
+                user: uSnap.data(),
+                profile: pSnap.exists() ? pSnap.data() : null
+              });
+            }
+          }
+          setPendingStudents(list);
+        } catch (err) {
+          console.error("Error loading pending students:", err);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, "memberships");
+      }
+    );
+
     return () => {
       unsubAlumni();
       unsubStudents();
       unsubMentorships();
+      unsubPendingStudents();
     };
   }, [schoolId]);
 
@@ -199,6 +235,31 @@ export default function AdminPanel({
       setSelectedReviewAlumni(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `alumniProfiles/${docId}`);
+    }
+  };
+
+  const handleApproveStudent = async (userId: string) => {
+    try {
+      await updateDoc(doc(db, "memberships", `${schoolId}_${userId}`), {
+        status: "active"
+      });
+      alert("Student registration approved successfully!");
+    } catch (error) {
+      console.error("Error approving student:", error);
+      alert("Failed to approve student. Please try again.");
+    }
+  };
+
+  const handleRejectStudent = async (userId: string) => {
+    if (!window.confirm("Are you sure you want to reject this student registration?")) return;
+    try {
+      await updateDoc(doc(db, "memberships", `${schoolId}_${userId}`), {
+        status: "rejected"
+      });
+      alert("Student registration status set to rejected.");
+    } catch (error) {
+      console.error("Error rejecting student:", error);
+      alert("Failed to reject student. Please try again.");
     }
   };
 
@@ -456,7 +517,7 @@ export default function AdminPanel({
           </div>
           <div>
             <span className="block text-2xl font-serif font-bold text-stone-900 leading-tight">
-              {pendingQueue.length}
+              {pendingQueue.length + pendingStudents.length}
             </span>
             <span className="text-[10px] text-stone-400 font-mono uppercase tracking-wider">
               Pending approvals
@@ -553,7 +614,7 @@ export default function AdminPanel({
       <div className="space-y-4">
         <h3 className="text-lg font-serif font-bold text-stone-900 flex items-center space-x-2">
           <span className="w-2 h-2 bg-amber-600 rounded-none"></span>
-          <span>Pending Approvals Queue ({pendingQueue.length})</span>
+          <span>Pending Alumni Approvals ({pendingQueue.length})</span>
         </h3>
 
         {pendingQueue.length === 0 ? (
@@ -612,6 +673,79 @@ export default function AdminPanel({
                       <span>Approve</span>
                     </button>
                   </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Pending Student Registrations Queue */}
+      <div className="space-y-4 pt-6 border-t border-stone-200">
+        <h3 className="text-lg font-serif font-bold text-stone-900 flex items-center space-x-2">
+          <span className="w-2 h-2 bg-amber-600 rounded-none"></span>
+          <span>Pending Student Approvals ({pendingStudents.length})</span>
+        </h3>
+
+        {pendingStudents.length === 0 ? (
+          <div className="bg-white border border-dashed border-stone-300 rounded-none p-8 text-center max-w-2xl">
+            <CheckCircle className="w-10 h-10 text-stone-300 mx-auto mb-2" />
+            <p className="text-stone-500 text-sm font-medium">All student registrations are fully reviewed and approved.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {pendingStudents.map((st) => (
+              <div 
+                key={st.userId}
+                className="bg-white border border-stone-200 rounded-none p-5 shadow-none space-y-4 flex flex-col justify-between hover:border-stone-400 transition-colors"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-3">
+                    <img
+                      src={st.user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(st.user.displayName)}`}
+                      alt={st.user.displayName}
+                      referrerPolicy="no-referrer"
+                      className="w-10 h-10 rounded-none object-cover border border-stone-200 bg-stone-50"
+                    />
+                    <div>
+                      <h4 className="font-serif font-bold text-stone-900 text-sm leading-tight">{st.user.displayName}</h4>
+                      <p className="text-[10px] text-stone-400 font-mono uppercase tracking-wider">
+                        {st.profile?.currentClass || "Profile Not Set Yet"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {st.profile ? (
+                    <div className="space-y-1 text-xs">
+                      {st.profile.intendedFieldOfStudy && (
+                        <p className="text-stone-600">
+                          Intended Field: <strong>{st.profile.intendedFieldOfStudy}</strong>
+                        </p>
+                      )}
+                      {st.profile.shortIntroduction && (
+                        <p className="text-stone-500 italic font-sans">
+                          "{st.profile.shortIntroduction}"
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-stone-400 italic">No onboarding profile completed yet.</p>
+                  )}
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-3 border-t border-stone-100">
+                  <button
+                    onClick={() => handleRejectStudent(st.userId)}
+                    className="border border-stone-200 hover:bg-stone-50 text-stone-700 font-mono text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-none transition-colors cursor-pointer"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => handleApproveStudent(st.userId)}
+                    className="bg-[#1C1A17] hover:bg-[#2E2B27] text-white font-mono text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-none transition-colors cursor-pointer"
+                  >
+                    Approve
+                  </button>
                 </div>
               </div>
             ))}

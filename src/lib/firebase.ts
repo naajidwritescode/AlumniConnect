@@ -62,7 +62,7 @@ async function testConnection() {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error("Please check your Firebase configuration. Client is offline.");
     } else {
-      console.log("Initial connection verified (network document checked).", error?.message);
+      // Connection verified (network document checked)
     }
   }
 }

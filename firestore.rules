@@ -41,11 +41,19 @@ service cloud.firestore {
         request.resource.data.createdBy == request.auth.uid &&
         request.resource.data.createdAt is timestamp &&
         request.resource.data.keys().hasOnly(['id', 'name', 'description', 'createdBy', 'createdAt', 'schoolCode', 'country', 'city', 'logoUrl']);
-      allow update: if (isAdminOf(schoolId) || isMember(schoolId)) &&
+      allow update: if isAdminOf(schoolId) &&
         request.resource.data.createdBy == resource.data.createdBy &&
         request.resource.data.createdAt == resource.data.createdAt &&
         request.resource.data.keys().hasOnly(['id', 'name', 'description', 'createdBy', 'createdAt', 'schoolCode', 'country', 'city', 'logoUrl']);
       allow delete: if false; // schools cannot be deleted through client
+    }
+
+    match /schoolCodes/{code} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly(['schoolId']) &&
+        request.resource.data.schoolId is string;
+      allow update, delete: if isSignedIn() && isAdminOf(resource.data.schoolId);
     }
 
     // Rules for memberships
@@ -67,11 +75,20 @@ service cloud.firestore {
         membershipId == (request.resource.data.schoolId + "_" + request.resource.data.userId) &&
         request.resource.data.userId == request.auth.uid &&
         request.resource.data.createdAt is timestamp &&
-        // For first-setup, we allow status 'active' and role 'admin'
-        // For guests, they must request with status 'pending' and correct role
-        (request.resource.data.status == 'active' || request.resource.data.status == 'pending') &&
-        (request.resource.data.role == 'student' || request.resource.data.role == 'alumnus' || request.resource.data.role == 'admin') &&
-        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'role', 'status', 'createdAt']);
+        request.resource.data.keys().hasOnly(['schoolId', 'userId', 'role', 'status', 'createdAt']) &&
+        (
+          // Creating a brand-new school: becomes admin, only that school's own creator may do this
+          (request.resource.data.role == 'admin' &&
+           request.resource.data.status == 'active' &&
+           (
+             getAfter(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)).data.createdBy == request.auth.uid ||
+             get(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)).data.createdBy == request.auth.uid
+           ))
+          ||
+          // Joining an existing school as student or alumnus: must always start pending, never active
+          ((request.resource.data.role == 'student' || request.resource.data.role == 'alumnus') &&
+           request.resource.data.status == 'pending')
+        );
       allow update: if isSignedIn() && isValidId(membershipId) &&
         (
           // Admin can update status and role of other members
@@ -101,9 +118,9 @@ service cloud.firestore {
         request.resource.data.createdAt is timestamp &&
         request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'role']);
       allow update: if isSignedIn() && isValidId(uid) && request.auth.uid == uid &&
-        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.createdAt is timestamp &&
         // Role cannot be updated by the user once set (self-promotion check)
-        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+        (!('role' in resource.data) || request.resource.data.role == resource.data.role) &&
         request.resource.data.keys().hasOnly(['email', 'displayName', 'photoURL', 'createdAt', 'role']);
       allow delete: if false;
     }
@@ -160,15 +177,13 @@ service cloud.firestore {
         (hasMembership(resource.data.schoolId) && resource.data.userId == request.auth.uid) ||
         isAdminOf(resource.data.schoolId)
       );
-      allow list: if isSignedIn() && (
-        isMember(resource.data.schoolId) ||
-        (hasMembership(resource.data.schoolId) && resource.data.userId == request.auth.uid) ||
-        isAdminOf(resource.data.schoolId)
-      );
+      allow list: if isSignedIn() && isMember(resource.data.schoolId);
+      allow list: if isSignedIn() && hasMembership(resource.data.schoolId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && isAdminOf(resource.data.schoolId);
       allow create: if isSignedIn() && isValidId(profileId) &&
         profileId == (request.resource.data.schoolId + "_" + request.resource.data.userId) &&
         request.resource.data.userId == request.auth.uid &&
-        isMember(request.resource.data.schoolId) &&
+        hasMembership(request.resource.data.schoolId) &&
         request.resource.data.keys().hasOnly(['schoolId', 'userId', 'currentClass', 'intendedFieldOfStudy', 'shortIntroduction']);
       allow update: if isSignedIn() && isValidId(profileId) &&
         (resource.data.userId == request.auth.uid || isAdminOf(resource.data.schoolId)) &&
@@ -219,7 +234,7 @@ service cloud.firestore {
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId) && (
         resource == null ||
-        request.auth.uid in resource.data.participantIds || 
+        resource.data.participantIds.hasAny([request.auth.uid]) || 
         isAdminOf(resource.data.schoolId)
       );
 
@@ -229,11 +244,11 @@ service cloud.firestore {
 
       allow create: if isSignedIn() && isValidId(conversationId) &&
         isMember(request.resource.data.schoolId) &&
-        request.auth.uid in request.resource.data.participantIds &&
+        request.resource.data.participantIds.hasAny([request.auth.uid]) &&
         request.resource.data.lastMessageAt is timestamp &&
         request.resource.data.keys().hasOnly(['schoolId', 'participantIds', 'lastMessageAt', 'conversationId']);
       allow update: if isSignedIn() && isValidId(conversationId) &&
-        (request.auth.uid in resource.data.participantIds) &&
+        resource.data.participantIds.hasAny([request.auth.uid]) &&
         request.resource.data.schoolId == resource.data.schoolId &&
         request.resource.data.participantIds == resource.data.participantIds &&
         request.resource.data.lastMessageAt is timestamp &&
@@ -244,14 +259,13 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow get: if isSignedIn() && isValidId(messageId) && (
           resource == null ||
-          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds ||
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds.hasAny([request.auth.uid]) ||
           isAdminOf(get(/databases/$(database)/documents/conversations/$(conversationId)).data.schoolId)
         );
-        allow list: if isSignedIn() &&
-          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds ||
-           isAdminOf(get(/databases/$(database)/documents/conversations/$(conversationId)).data.schoolId));
+        allow list: if isSignedIn() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow list: if isSignedIn() && isAdminOf(get(/databases/$(database)/documents/conversations/$(conversationId)).data.schoolId);
         allow create: if isSignedIn() && isValidId(messageId) &&
-          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds) &&
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds.hasAny([request.auth.uid]) &&
           request.resource.data.senderId == request.auth.uid &&
           request.resource.data.sentAt is timestamp &&
           request.resource.data.keys().hasOnly(['senderId', 'text', 'sentAt', 'messageId']);
