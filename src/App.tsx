@@ -25,6 +25,7 @@ import {
 } from "firebase/firestore";
 import { auth, db, handleFirestoreError, OperationType } from "./lib/firebase";
 import { UserRole, UserDoc, SchoolDoc, MembershipDoc } from "./types";
+import { Analytics } from "@vercel/analytics/react";
 
 // Components
 import Sidebar from "./components/Sidebar";
@@ -2160,25 +2161,28 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FCFAF6] flex flex-col lg:flex-row">
-      <Sidebar 
-        role={userRole!}
-        currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        networkName={currentSchool?.name || "AlumniConnect"}
-        userName={currentUser?.displayName || "Member"}
-        userPhoto={currentUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(currentUser?.displayName || "M")}`}
-        onLogout={handleLogout}
-        pendingRequestsCount={pendingRequestsCount}
-        onSwitchNetwork={mySchools.length > 1 ? () => setCurrentSchoolId(null) : undefined}
-        alumniStatus={alumniStatus}
-      />
+    <>
+      <div className="min-h-screen bg-[#FCFAF6] flex flex-col lg:flex-row">
+        <Sidebar 
+          role={userRole!}
+          currentTab={currentTab}
+          setCurrentTab={setCurrentTab}
+          networkName={currentSchool?.name || "AlumniConnect"}
+          userName={currentUser?.displayName || "Member"}
+          userPhoto={currentUser?.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(currentUser?.displayName || "M")}`}
+          onLogout={handleLogout}
+          pendingRequestsCount={pendingRequestsCount}
+          onSwitchNetwork={mySchools.length > 1 ? () => setCurrentSchoolId(null) : undefined}
+          alumniStatus={alumniStatus}
+        />
 
-      <main className="flex-1 min-w-0 p-4 md:p-8 lg:p-10 pt-20 lg:pt-10 overflow-y-auto">
-        <div className="max-w-6xl mx-auto">
-          {renderActiveTabContent()}
-        </div>
-      </main>
-    </div>
+        <main className="flex-1 min-w-0 p-4 md:p-8 lg:p-10 pt-20 lg:pt-10 overflow-y-auto">
+          <div className="max-w-6xl mx-auto">
+            {renderActiveTabContent()}
+          </div>
+        </main>
+      </div>
+      <Analytics />
+    </>
   );
 }
